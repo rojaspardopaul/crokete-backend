@@ -6,7 +6,7 @@ const customerRegisterBody = (option) => { return `
 >
 
   <head>
-    <title>Kachabazar</title>
+    <title>Crokete Pet</title>
     <!--[if !mso]><!-->
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <!--<![endif]-->
@@ -104,7 +104,7 @@ const customerRegisterBody = (option) => { return `
                                           <img
                                             alt
                                             height="auto"
-                                            src="https://res.cloudinary.com/ahossain/image/upload/v1681454665/logo/logo-color_qw1trc.png"
+                                            src="${CONFIG.CLOUDINARY.getImageUrl(CONFIG.CLOUDINARY.IMAGES.LOGO)}"
                                             style="border:0;display:block;outline:none;text-decoration:none;height:auto;width:80px;font-size:13px;padding-bottom:30px;"
                                             width="80"
                                             height="80"
@@ -202,19 +202,18 @@ const customerRegisterBody = (option) => { return `
                             style="font-size:15px;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;background:#ffffff;background-color:#ffffff"
                           >
                             <!--start email_template -->
-                            <h2>Hello ${option.email}</h2>
-                            <p>Verify your email address to complete the signup
-                              and login into your
-                              <strong>KachaBazar</strong>
-                              account.
+                            <h2>Hola ${option.email}</h2>
+                            <p>Verifica tu dirección de correo electrónico para completar el registro
+                              e iniciar sesión en tu cuenta de
+                              <strong>Crokete Pet</strong>.
                             </p>
 
                             <p style="margin-bottom:30px;">
-                              <p>This link will expire in
-                                <strong> 15 minute</strong>.</p>
+                              <p>Este enlace expirará en
+                                <strong> 15 minutos</strong>.</p>
 
-                              <p style="margin-bottom:20px;">Click this link for
-                                active your account</p></p>
+                              <p style="margin-bottom:20px;">Haz clic en este enlace para
+                                activar tu cuenta</p></p>
 
                             <a
                               href="${process.env.STORE_URL}"
@@ -222,18 +221,18 @@ const customerRegisterBody = (option) => { return `
                               email-verification
                               ${token}
                               style="background:#22c55e;color:white;border:1px solid #22c55e; padding: 10px 15px; border-radius: 4px; text-decoration:none;"
-                            >Verify Account</a>
+                            >Verificar Cuenta</a>
 
-                            <p style="margin-top: 35px;">If you did not initiate
-                              this request, please contact us immediately at
-                              support@kachabazar.com</p>
+                            <p style="margin-top: 35px;">Si no iniciaste esta solicitud,
+                              por favor contáctanos inmediatamente en
+                              ${CONFIG.COMPANY.SUPPORT_EMAIL}</p>
 
                             <p
                               style="margin:0px auto; margin-top:40px; text-align:center;"
-                            >Thank you
+                            >Gracias
                               <h4
                                 style="margin:1px; margin-bottom:0px; text-align:center;"
-                              >KachaBazar Team</h4></p>
+                              >Equipo Crokete Pet</h4></p>
 
                             <!--end email_template -->
                           </div>
@@ -355,19 +354,19 @@ const customerRegisterBody = (option) => { return `
                                                       <div
                                                         style="padding-top:10px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:11px;font-weight:400;line-height:16px;text-align:center;color:#8a8a8a;"
                                                       >
-                                                        You are receiving this
-                                                        email because you
-                                                        registered with
-                                                        KachaBazar and agreed to
-                                                        receive emails from us
-                                                        regarding new features,
-                                                        events and special
-                                                        offers.
+                                                        Estás recibiendo este
+                                                        correo porque te
+                                                        registraste en
+                                                        Crokete Pet y aceptaste
+                                                        recibir correos de nosotros
+                                                        sobre nuevas funciones,
+                                                        eventos y ofertas
+                                                        especiales.
                                                         <p
                                                           style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:11px;font-weight:400;line-height:16px;text-align:center;color:#303030;"
                                                         >
-                                                          &copy; KachaBazar, All
-                                                          Rights Reserved.</p></div>
+                                                          &copy; Crokete Pet, Todos los
+                                                          Derechos Reservados.</p></div>
                                                     </td>
                                                   </tr>
 

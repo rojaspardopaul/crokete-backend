@@ -3,6 +3,7 @@ const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 dayjs.extend(utc);
 const jwt = require("jsonwebtoken");
+const CONFIG = require("../config");
 const {
   signInToken,
   tokenForVerify,
@@ -105,7 +106,7 @@ const forgetPassword = async (req, res) => {
         <a href=${process.env.ADMIN_URL}/reset-password/${token}  style="background:#22c55e;color:white;border:1px solid #22c55e; padding: 10px 15px; border-radius: 4px; text-decoration:none;">Reset Password </a>
 
         
-        <p style="margin-top: 35px;">If you did not initiate this request, please contact us immediately at support@kachabazar.com</p>
+        <p style="margin-top: 35px;">Si no iniciaste esta solicitud, por favor contáctanos inmediatamente en ${CONFIG.COMPANY.SUPPORT_EMAIL}</p>
 
         <p style="margin-bottom:0px;">Thank you</p>
         <strong>Kachabazar Team</strong>

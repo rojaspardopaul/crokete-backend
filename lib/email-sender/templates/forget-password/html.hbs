@@ -6,7 +6,7 @@ const forgetPasswordEmailBody = (option) => { return `
 >
 
   <head>
-    <title>Kachabazar</title>
+    <title>Crokete Pet</title>
     <!--[if !mso]><!-->
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <!--<![endif]-->
@@ -104,7 +104,7 @@ const forgetPasswordEmailBody = (option) => { return `
                                           <img
                                             alt
                                             height="auto"
-                                            src="https://res.cloudinary.com/ahossain/image/upload/v1676296566/Kachabazar%20files/cc_v8jite.png"
+                                            src="${CONFIG.CLOUDINARY.getImageUrl(CONFIG.CLOUDINARY.IMAGES.LOGO)}"
                                             style="border:0;display:block;outline:none;text-decoration:none;height:auto;width:80px;font-size:13px;padding-bottom:30px;"
                                             width="80"
                                             height="80"
@@ -202,18 +202,17 @@ const forgetPasswordEmailBody = (option) => { return `
                             style="font-size:15px;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;background:#ffffff;background-color:#ffffff"
                           >
                             <!--start email_template -->
-                            <h2>Hello ${option.verifyEmail}</h2>
-                            <p>A request has been received to change the
-                              password for your
-                              <strong>Kachabazar</strong>
-                              account.
+                            <h2>Hola ${option.verifyEmail}</h2>
+                            <p>Se ha recibido una solicitud para cambiar la
+                              contraseña de tu cuenta de
+                              <strong>Crokete Pet</strong>.
                             </p>
 
-                            <p>This link will expire in
-                              <strong> 15 minute</strong>.</p>
+                            <p>Este enlace expirará en
+                              <strong> 15 minutos</strong>.</p>
 
-                            <p style="margin-bottom:40px;">Click this link for
-                              reset your password</p>
+                            <p style="margin-bottom:40px;">Haz clic en este enlace para
+                              restablecer tu contraseña</p>
 
                             <a
                               href="https:"
@@ -221,18 +220,18 @@ const forgetPasswordEmailBody = (option) => { return `
                               reset-password
                               ${option.token}
                               style="background:#22c55e;color:white;border:1px solid #22c55e; padding: 10px 15px; border-radius: 4px; text-decoration:none;"
-                            >Reset Password </a>
+                            >Restablecer Contraseña</a>
 
-                            <p style="margin-top: 50px;">If you did not initiate
-                              this request, please contact us immediately at
-                              support@kachabazar.com</p>
+                            <p style="margin-top: 50px;">Si no iniciaste
+                              esta solicitud, por favor contáctanos inmediatamente en
+                              no-responder@crokete.com.mx</p>
 
                             <p
                               style="margin:0px auto; padding-bottom:0px; text-align:center;"
-                            >Thank you
+                            >Gracias
                               <h4
                                 style="margin:1px; text-align:center;padding-bottom:0px;"
-                              >Kachabazar Team</h4></p>
+                              >Equipo Crokete Pet</h4></p>
 
                             <!--end email_template -->
                           </div>
@@ -354,19 +353,19 @@ const forgetPasswordEmailBody = (option) => { return `
                                                       <div
                                                         style="padding-top:0px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:11px;font-weight:400;line-height:16px;text-align:center;color:#8a8a8a;"
                                                       >
-                                                        You are receiving this
-                                                        email because you
-                                                        registered with
-                                                        Kachabazar and agreed to
-                                                        receive emails from us
-                                                        regarding new features,
-                                                        events and special
-                                                        offers.
+                                                        Estás recibiendo este
+                                                        correo porque te
+                                                        registraste en
+                                                        Crokete Pet y aceptaste
+                                                        recibir correos de nosotros
+                                                        sobre nuevas funciones,
+                                                        eventos y ofertas
+                                                        especiales.
                                                         <p
                                                           style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:11px;font-weight:400;line-height:16px;text-align:center;color:#303030;"
                                                         >
-                                                          &copy; Kachabazar, All
-                                                          Rights Reserved.</p></div>
+                                                          &copy; Crokete Pet, Todos los
+                                                          Derechos Reservados.</p></div>
                                                     </td>
                                                   </tr>
 
