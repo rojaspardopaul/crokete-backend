@@ -1,6 +1,7 @@
 require("dotenv").config();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const CONFIG = require("../config");
 const Customer = require("../models/Customer");
 const {
   tokenForVerify,
@@ -30,10 +31,8 @@ const verifyEmailAddress = async (req, res) => {
       token: token,
     };
     const body = {
-      from: process.env.EMAIL_USER,
-      // from: "info@demomailtrap.com",
+      from: CONFIG.EMAIL.FROM,
       to: `${req.body.email}`,
-      subject: "Activación de Cuenta",
       subject: "Verifica tu Correo Electrónico",
       html: customerRegisterBody(option),
     };
@@ -270,9 +269,9 @@ const forgetPassword = async (req, res) => {
     };
 
     const body = {
-      from: process.env.EMAIL_USER,
+      from: CONFIG.EMAIL.FROM,
       to: `${req.body.email}`,
-      subject: "Password Reset",
+      subject: "Restablecer Contraseña",
       html: forgetPasswordEmailBody(option),
     };
 

@@ -55,8 +55,11 @@ const CONFIG = {
   // CONFIGURACIÓN DE EMAIL
   // ============================================
   EMAIL: {
-    FROM: 'soporte@crokete.com.mx',
-    REPLY_TO: 'soporte@crokete.com.mx',
+    // Formato con nombre visible: "Nombre" <email@dominio.com>
+    FROM: '"Crokete Pet" <no-responder@crokete.com.mx>',
+    FROM_EMAIL: 'no-responder@crokete.com.mx', // Solo el email
+    FROM_NAME: 'Crokete Pet', // Solo el nombre
+    REPLY_TO: 'no-responder@crokete.com.mx',
     
     // Configuración SMTP (usar process.env en producción)
     SMTP: {

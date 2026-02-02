@@ -93,9 +93,9 @@ const forgetPassword = async (req, res) => {
   } else {
     const token = tokenForVerify(isAdded);
     const body = {
-      from: process.env.EMAIL_USER,
+      from: CONFIG.EMAIL.FROM,
       to: `${req.body.verifyEmail}`,
-      subject: "Password Reset",
+      subject: "Restablecer Contraseña de Administrador",
       html: `<h2>Hello ${req.body.verifyEmail}</h2>
       <p>A request has been received to change the password for your <strong>Kachabazar</strong> account </p>
 
