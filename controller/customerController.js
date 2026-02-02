@@ -20,7 +20,7 @@ const verifyEmailAddress = async (req, res) => {
   const isAdded = await Customer.findOne({ email: req.body.email });
   if (isAdded) {
     return res.status(403).send({
-      message: "This Email already Added!",
+      message: "Este correo electrónico ya está registrado.",
     });
   } else {
     const token = tokenForVerify(req.body);
@@ -33,12 +33,12 @@ const verifyEmailAddress = async (req, res) => {
       from: process.env.EMAIL_USER,
       // from: "info@demomailtrap.com",
       to: `${req.body.email}`,
-      subject: "Email Activation",
-      subject: "Verify Your Email",
+      subject: "Activación de Cuenta",
+      subject: "Verifica tu Correo Electrónico",
       html: customerRegisterBody(option),
     };
 
-    const message = "Please check your email to verify your account!";
+    const message = "¡Por favor, revisa tu correo electrónico para verificar tu cuenta!";
     sendEmail(body, res, message);
   }
 };
@@ -118,7 +118,7 @@ const registerCustomer = async (req, res) => {
         name: isAdded.name,
         email: isAdded.email,
         password: password,
-        message: "Email Already Verified!",
+        message: "¡Correo electrónico ya verificado!",
       });
     }
 
@@ -129,7 +129,7 @@ const registerCustomer = async (req, res) => {
         async (err, decoded) => {
           if (err) {
             return res.status(401).send({
-              message: "Token Expired, Please try again!",
+              message: "El token ha expirado. ¡Por favor, inténtalo de nuevo!",
             });
           }
 
@@ -138,7 +138,7 @@ const registerCustomer = async (req, res) => {
           console.log("existingUser");
 
           if (existingUser) {
-            return res.status(400).send({ message: "User already exists!" });
+            return res.status(400).send({ message: "¡El usuario ya existe!" });
           } else {
             const newUser = new Customer({
               name,
@@ -156,7 +156,7 @@ const registerCustomer = async (req, res) => {
               _id: newUser._id,
               name: newUser.name,
               email: newUser.email,
-              message: "Email Verified, Please Login Now!",
+              message: "¡Correo verificado! Por favor, inicia sesión ahora.",
             });
           }
         }
@@ -165,7 +165,7 @@ const registerCustomer = async (req, res) => {
   } catch (error) {
     console.error("Error during email verification:", error);
     res.status(500).send({
-      message: "Internal server error. Please try again later.",
+      message: "Error interno del servidor. Por favor, inténtalo más tarde.",
     });
   }
 };

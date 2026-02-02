@@ -71,7 +71,7 @@ const createPaymentIntent = async (req, res) => {
         const updated_intent = await stripeInstance.paymentIntents.update(
           payment_intent.id,
           {
-            amount: formatAmountForStripe(amount, "usd"),
+            amount: formatAmountForStripe(amount, "mxn"),
           }
         );
         // console.log("updated_intent", updated_intent);
@@ -90,8 +90,8 @@ const createPaymentIntent = async (req, res) => {
   try {
     // Create PaymentIntent from body params.
     const params = {
-      amount: formatAmountForStripe(amount, "usd"),
-      currency: "usd",
+      amount: formatAmountForStripe(amount, "mxn"),
+      currency: "mxn",
       description: process.env.STRIPE_PAYMENT_DESCRIPTION || "",
       automatic_payment_methods: {
         enabled: true,
