@@ -31,7 +31,7 @@ const generateAccessToken = (user) => {
       image: user.image,
     },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_ACCESS_LIFETIME || "15m" } // short-lived
+    { expiresIn: process.env.JWT_ACCESS_LIFETIME || "1d" } // extended to 1 day to match NextAuth session
   );
 };
 
@@ -50,6 +50,7 @@ const tokenForVerify = (user) => {
       name: user.name,
       email: user.email,
       password: user.password,
+      phone: user.phone,
     },
     process.env.JWT_SECRET_FOR_VERIFY,
     { expiresIn: "15m" }
@@ -68,8 +69,14 @@ const isAuth = async (req, res, next) => {
   } catch (err) {
     console.log("error on isAuth", err);
 
+    const message = err.name === "TokenExpiredError" 
+      ? "Tu sesión ha expirado. Por favor, inicia sesión nuevamente."
+      : err.name === "JsonWebTokenError"
+      ? "Sesión inválida. Por favor, inicia sesión nuevamente."
+      : err.message;
+
     res.status(401).send({
-      message: err.message,
+      message,
     });
   }
 };
@@ -81,6 +88,41 @@ const isAdmin = async (req, res, next) => {
   } else {
     res.status(401).send({
       message: "User is not Admin",
+    });
+  }
+};
+
+const isSuperAdmin = async (req, res, next) => {
+  console.log(`🔍isSuperAdmin ${req.method} : ${req.originalUrl}`);
+  try {
+    if (!req.user) {
+      return res.status(401).send({
+        message: "Authentication required",
+      });
+    }
+
+    // Fetch the admin from database to verify current role
+    const admin = await Admin.findById(req.user._id);
+    
+    if (!admin) {
+      return res.status(404).send({
+        message: "Admin not found",
+      });
+    }
+
+    if (admin.role !== "super admin") {
+      return res.status(403).send({
+        message: "Access denied. Super Admin privileges required.",
+      });
+    }
+
+    // Add admin to request for use in controllers
+    req.admin = admin;
+    next();
+  } catch (err) {
+    console.log("error on isSuperAdmin", err);
+    res.status(500).send({
+      message: err.message,
     });
   }
 };
@@ -111,6 +153,7 @@ const handleEncryptData = (data) => {
 module.exports = {
   isAuth,
   isAdmin,
+  isSuperAdmin,
   signInToken,
   tokenForVerify,
   handleEncryptData,

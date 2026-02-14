@@ -20,6 +20,7 @@ const settingRoutes = require("../routes/settingRoutes");
 const currencyRoutes = require("../routes/currencyRoutes");
 const languageRoutes = require("../routes/languageRoutes");
 const notificationRoutes = require("../routes/notificationRoutes");
+const auditRoutes = require("../routes/auditRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
 // const {
 //   getGlobalSetting,
@@ -36,8 +37,22 @@ app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "4mb" }));
 app.use(helmet());
-app.options("*", cors()); // include before other routes
-app.use(cors());
+
+// Configuración CORS para permitir solicitudes desde el frontend
+const corsOptions = {
+  origin: [
+    "http://localhost:3000",
+    "http://localhost:4100",
+    "http://localhost:3001",
+    process.env.ADMIN_URL,
+    process.env.STORE_URL,
+  ].filter(Boolean),
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+app.options("*", cors(corsOptions));
+app.use(cors(corsOptions));
 
 //root route
 app.get("/", (req, res) => {
@@ -60,6 +75,7 @@ app.use("/v1/notification/", isAuth, notificationRoutes);
 //if you not use admin dashboard then these two route will not needed.
 app.use("/v1/admin/", adminRoutes);
 app.use("/v1/orders/", isAuth, orderRoutes);
+app.use("/v1/audit/", auditRoutes);
 
 // Use express's default error handling middleware
 app.use((err, req, res, next) => {

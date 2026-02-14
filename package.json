@@ -11,7 +11,9 @@
     "data:import": "node script/seed.js",
     "product": "node script/product.js",
     "generate-password": "node script/script.js",
-    "generate-reviews": "node script/reviews.js"
+    "generate-reviews": "node script/reviews.js",
+    "init:admin": "node scripts/init-super-admin.js",
+    "update:admin-access": "node scripts/update-super-admin-access.js"
   },
   "author": "HtmlLover",
   "license": "Regular",

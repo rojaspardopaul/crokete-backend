@@ -12,36 +12,46 @@ const {
   updateStaff,
   deleteStaff,
   updatedStatus,
+  getMyProfile,
+  updateMyProfile,
 } = require("../controller/adminController");
 
 const { passwordVerificationLimit } = require("../lib/email-sender/sender");
+const { isAuth, isSuperAdmin } = require("../config/auth");
+const { loginRateLimiter } = require("../lib/security/rateLimiter");
 
 /**
- * Admin Authentication
+ * Admin Authentication (Public routes)
  */
-// Register admin/staff
-router.post("/register", registerAdmin);
 // Admin login
-router.post("/login", loginAdmin);
+router.post("/login", loginRateLimiter, loginAdmin);
 // Forget password
 router.put("/forget-password", passwordVerificationLimit, forgetPassword);
 // Reset password
 router.put("/reset-password", resetPassword);
 
 /**
- * Staff Management
+ * Current Admin Profile (Protected - Any authenticated admin)
+ */
+// Get own profile
+router.get("/me", isAuth, getMyProfile);
+// Update own profile
+router.put("/me", isAuth, updateMyProfile);
+
+/**
+ * Staff Management (Protected routes - Super Admin only)
  */
 // Add a staff
-router.post("/add", addStaff);
+router.post("/add", isAuth, isSuperAdmin, addStaff);
 // Get all staff
-router.get("/", getAllStaff);
+router.get("/", isAuth, isSuperAdmin, getAllStaff);
 // Get a single staff by ID (changed to GET from POST)
-router.get("/:id", getStaffById);
+router.get("/:id", isAuth, isSuperAdmin, getStaffById);
 // Update a staff by ID
-router.put("/:id", updateStaff);
+router.put("/:id", isAuth, isSuperAdmin, updateStaff);
 // Update staff status by ID
-router.put("/update-status/:id", updatedStatus);
+router.put("/update-status/:id", isAuth, isSuperAdmin, updatedStatus);
 // Delete a staff by ID
-router.delete("/:id", deleteStaff);
+router.delete("/:id", isAuth, isSuperAdmin, deleteStaff);
 
 module.exports = router;

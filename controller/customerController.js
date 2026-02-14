@@ -100,7 +100,7 @@ const registerCustomer = async (req, res) => {
   const token = req.params.token;
 
   try {
-    const { name, email, password } = jwt.decode(token);
+    const { name, email, password, phone } = jwt.decode(token);
 
     // Check if the user is already registered
     const isAdded = await Customer.findOne({ email });
@@ -116,6 +116,7 @@ const registerCustomer = async (req, res) => {
         _id: isAdded._id,
         name: isAdded.name,
         email: isAdded.email,
+        phone: isAdded.phone,
         password: password,
         message: "¡Correo electrónico ya verificado!",
       });
@@ -142,6 +143,7 @@ const registerCustomer = async (req, res) => {
             const newUser = new Customer({
               name,
               email,
+              phone,
               password: bcrypt.hashSync(password),
             });
 
@@ -155,6 +157,7 @@ const registerCustomer = async (req, res) => {
               _id: newUser._id,
               name: newUser.name,
               email: newUser.email,
+              phone: newUser.phone,
               message: "¡Correo verificado! Por favor, inicia sesión ahora.",
             });
           }
@@ -210,14 +213,14 @@ const loginCustomer = async (req, res) => {
       });
     } else {
       res.status(401).send({
-        message: "Invalid user or password!",
-        error: "Invalid user or password!",
+        message: "¡Usuario o contraseña inválidos!",
+        error: "¡Usuario o contraseña inválidos!",
       });
     }
   } catch (err) {
     res.status(500).send({
       message: err.message,
-      error: "Invalid user or password!",
+      error: "¡Usuario o contraseña inválidos!",
     });
   }
 };
@@ -285,19 +288,35 @@ const resetPassword = async (req, res) => {
   const { email } = jwt.decode(token);
   const customer = await Customer.findOne({ email: email });
 
-  if (token) {
-    jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY, (err, decoded) => {
+  if (!token) {
+    return res.status(400).send({
+      message: "Token is required!",
+    });
+  }
+
+  if (!customer) {
+    return res.status(404).send({
+      message: "Usuario no encontrado!",
+    });
+  }
+
+  try {
+    jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY, async (err, decoded) => {
       if (err) {
         return res.status(500).send({
-          message: "Token expired, please try again!",
+          message: "El token ha expirado, por favor intenta de nuevo!",
         });
       } else {
         customer.password = bcrypt.hashSync(req.body.newPassword);
-        customer.save();
+        await customer.save();
         res.send({
-          message: "Your password change successful, you can login now!",
+          message: "¡Tu contraseña ha sido cambiada exitosamente! Ahora puedes iniciar sesión",
         });
       }
+    });
+  } catch (error) {
+    return res.status(500).send({
+      message: "Error al restablecer la contraseña",
     });
   }
 };
