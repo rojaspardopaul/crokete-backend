@@ -38,6 +38,16 @@ const productSchema = new mongoose.Schema(
       ref: "Category",
       required: true,
     },
+    pet: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Pet",
+      required: false,
+    },
+    brand: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Brand",
+      required: false,
+    },
     image: {
       type: Array,
       required: false,

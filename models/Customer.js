@@ -80,6 +80,20 @@ const customerSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+
+    // Loyalty program
+    loyalty: {
+      points: { type: Number, default: 0 },
+      totalPoints: { type: Number, default: 0 }, // lifetime earned
+      totalSpent: { type: Number, default: 0 }, // lifetime $ spent
+      orderCount: { type: Number, default: 0 },
+      tier: {
+        type: String,
+        enum: ["nuevo", "frecuente", "vip"],
+        default: "nuevo",
+      },
+      joinedAt: { type: Date, default: Date.now },
+    },
   },
   {
     timestamps: true,

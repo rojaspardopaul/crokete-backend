@@ -179,6 +179,8 @@ const updateProduct = async (req, res) => {
       product.prices = req.body.prices;
       product.image = req.body.image;
       product.tag = req.body.tag;
+      product.pet = req.body.pet || null;
+      product.brand = req.body.brand || null;
 
       await product.save();
       res.send({ data: product, message: "Product updated successfully!" });
@@ -268,7 +270,7 @@ const getShowingStoreProducts = async (req, res) => {
 
     // console.log("getShowingStoreProducts");
 
-    const { category, title, slug } = req.query;
+    const { category, title, slug, pet, brand } = req.query;
     // console.log("title", title);
 
     // console.log("query", req);
@@ -277,6 +279,14 @@ const getShowingStoreProducts = async (req, res) => {
       queryObject.categories = {
         $in: [category],
       };
+    }
+
+    if (pet) {
+      queryObject.pet = pet;
+    }
+
+    if (brand) {
+      queryObject.brand = brand;
     }
 
     if (title) {
@@ -299,23 +309,38 @@ const getShowingStoreProducts = async (req, res) => {
     if (slug) {
       products = await Product.find(queryObject)
         .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
         .sort({ _id: -1 })
         .limit(100);
       relatedProducts = await Product.find({
         category: products[0]?.category,
-      }).populate({ path: "category", select: "_id name" });
+      }).populate({ path: "category", select: "_id name" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" });
       reviews = await Review.find({ product: products[0]._id }).populate({
         path: "user",
         select: "name image",
       });
-    } else if (title || category) {
+    } else if (title || category || pet || brand) {
       products = await Product.find(queryObject)
         .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
         .sort({ _id: -1 })
         .limit(100);
     } else {
+      products = await Product.find({ status: "show" })
+        .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
+        .sort({ _id: -1 })
+        .limit(100);
+
       popularProducts = await Product.find({ status: "show" })
         .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
         .sort({ sales: -1 })
         .limit(20);
 

@@ -2,6 +2,7 @@ require("dotenv").config();
 const stripe = require("stripe");
 const Razorpay = require("razorpay");
 const MailChecker = require("mailchecker");
+const CONFIG = require("../config");
 // const stripe = require("stripe")(`${process.env.STRIPE_KEY}` || null); /// use hardcoded key if env not work
 
 const mongoose = require("mongoose");
@@ -305,9 +306,9 @@ const sendEmailInvoiceToCustomer = async (req, res) => {
     };
 
     const body = {
-      from: req.body.company_info?.from_email || "sales@kachabazar.com",
+      from: CONFIG.EMAIL.FROM,
       to: user.email,
-      subject: `Your Order - ${req.body.invoice} at ${req.body.company_info.company}`,
+      subject: `Tu Pedido #${req.body.invoice} - ${CONFIG.COMPANY.NAME}`,
       html: customerInvoiceEmailBody(option),
       attachments: [
         {
@@ -316,7 +317,7 @@ const sendEmailInvoiceToCustomer = async (req, res) => {
         },
       ],
     };
-    const message = `Invoice successfully sent to the customer ${user.name}`;
+    const message = `Factura enviada exitosamente al cliente ${user.name}`;
     sendEmail(body, res, message);
   } catch (err) {
     res.status(500).send({

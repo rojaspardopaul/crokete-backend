@@ -153,25 +153,60 @@ const forgetPassword = async (req, res) => {
     });
   } else {
     const token = tokenForVerify(isAdded);
+    const resetUrl = process.env.ADMIN_URL + '/reset-password/' + token;
+    const logo = CONFIG.CLOUDINARY.getImageUrl(CONFIG.CLOUDINARY.IMAGES.LOGO);
+    const company = CONFIG.COMPANY.NAME;
+    const year = new Date().getFullYear();
+    const bc = '#3B82F6';
+    const bd = '#1E3A5F';
+    const bg = '#F1F5F9';
+    const tp = '#1E293B';
+    const ts = '#64748B';
     const body = {
       from: CONFIG.EMAIL.FROM,
       to: `${req.body.verifyEmail}`,
       subject: "Restablecer Contraseña de Administrador",
-      html: `<h2>Hola ${req.body.verifyEmail}</h2>
-      <p>Se ha recibido una solicitud para cambiar la contraseña de tu cuenta de <strong>Crokete</strong></p>
-
-        <p>Este enlace expirará en <strong>15 minutos</strong>.</p>
-
-        <p style="margin-bottom:20px;">Haz clic en este enlace para restablecer tu contraseña</p>
-
-        <a href=${process.env.ADMIN_URL}/reset-password/${token}  style="background:#22c55e;color:white;border:1px solid #22c55e; padding: 10px 15px; border-radius: 4px; text-decoration:none;">Restablecer Contraseña</a>
-
-        
-        <p style="margin-top: 35px;">Si no iniciaste esta solicitud, por favor contáctanos inmediatamente en ${CONFIG.COMPANY.SUPPORT_EMAIL}</p>
-
-        <p style="margin-bottom:0px;">Gracias</p>
-        <strong>Equipo Crokete</strong>
-             `,
+      html: '<!DOCTYPE html>'
++ '<html xmlns="http://www.w3.org/1999/xhtml" lang="es"><head>'
++ '<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>'
++ '<title>Restablecer Contraseña - ' + company + '</title></head>'
++ '<body style="margin:0;padding:0;background-color:' + bg + ';font-family:Helvetica Neue,Helvetica,Arial,sans-serif;">'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:' + bg + ';"><tr><td align="center" style="padding:32px 16px;">'
++ '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">'
++ '<tr><td bgcolor="' + bd + '" style="background-color:' + bd + ';background:linear-gradient(135deg,' + bd + ' 0%,' + bc + ' 100%);padding:32px 40px;border-radius:12px 12px 0 0;text-align:center;">'
++ '<img src="' + logo + '" alt="' + company + '" width="120" style="display:block;margin:0 auto 16px;max-width:120px;height:auto;"/>'
++ '<h1 style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;">Restablecer Contraseña</h1>'
++ '<p style="margin:8px 0 0;font-size:13px;color:rgba(255,255,255,0.8);">Panel de Administración</p>'
++ '</td></tr>'
++ '<tr><td style="background-color:#FFFFFF;padding:0;">'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
++ '<td style="padding:36px 40px 0;text-align:center;">'
++ '<div style="display:inline-block;width:64px;height:64px;border-radius:50%;background-color:' + bg + ';line-height:64px;font-size:28px;">&#128274;</div>'
++ '</td></tr></table>'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
++ '<td style="padding:20px 40px 8px;text-align:center;">'
++ '<h2 style="margin:0;font-size:18px;font-weight:700;color:' + tp + ';">Hola ' + req.body.verifyEmail + '</h2>'
++ '<p style="margin:12px 0 0;font-size:14px;color:' + ts + ';line-height:1.6;">Se ha recibido una solicitud para restablecer la contraseña de tu cuenta de administrador en <strong>' + company + '</strong>.</p>'
++ '</td></tr></table>'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
++ '<td style="padding:28px 40px;text-align:center;">'
++ '<a href="' + resetUrl + '" style="display:inline-block;background-color:' + bc + ';color:#FFFFFF;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:8px;">Restablecer Contraseña</a>'
++ '</td></tr></table>'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
++ '<td style="padding:0 40px 8px;text-align:center;">'
++ '<p style="margin:0;font-size:12px;color:' + ts + ';">Si el botón no funciona, copia y pega este enlace:</p>'
++ '<p style="margin:6px 0 0;font-size:12px;color:' + bc + ';word-break:break-all;"><a href="' + resetUrl + '" style="color:' + bc + ';text-decoration:none;">' + resetUrl + '</a></p>'
++ '</td></tr></table>'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:20px 40px 28px;">'
++ '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:' + bg + ';border-radius:8px;border-left:4px solid #EF4444;"><tr><td style="padding:16px 20px;">'
++ '<p style="margin:0;font-size:13px;color:' + ts + ';line-height:1.5;"><strong>Importante:</strong> Este enlace expirará en 15 minutos. Si no solicitaste este cambio, contáctanos en <a href="mailto:' + CONFIG.COMPANY.SUPPORT_EMAIL + '" style="color:' + bc + ';font-weight:600;text-decoration:none;">' + CONFIG.COMPANY.SUPPORT_EMAIL + '</a></p>'
++ '</td></tr></table></td></tr></table>'
++ '</td></tr>'
++ '<tr><td style="background-color:' + bd + ';padding:28px 40px;border-radius:0 0 12px 12px;text-align:center;">'
++ '<p style="margin:0 0 6px;font-size:12px;color:rgba(255,255,255,0.7);">Correo enviado desde el panel de administración de ' + company + '.</p>'
++ '<p style="margin:0;font-size:11px;color:rgba(255,255,255,0.5);">&copy; ' + year + ' ' + company + '. Todos los derechos reservados.</p>'
++ '</td></tr>'
++ '</table></td></tr></table></body></html>',
     };
     const message = "Por favor revisa tu correo electrónico para restablecer tu contraseña";
     sendEmail(body, res, message);

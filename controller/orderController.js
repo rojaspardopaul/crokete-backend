@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const { processOrderLoyalty } = require("./loyaltyController");
 
 const getAllOrders = async (req, res) => {
   const {
@@ -155,9 +156,21 @@ const updateOrder = async (req, res) => {
   try {
     const newStatus = req.body.status;
 
+    // Get the current order to know previous status
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).send({ message: "Order not found" });
+    }
+    const previousStatus = order.status;
+
     await Order.updateOne(
       { _id: req.params.id },
       { $set: { status: newStatus } }
+    );
+
+    // Process loyalty points (async, non-blocking)
+    processOrderLoyalty(req.params.id, newStatus, previousStatus).catch(
+      (err) => console.error("[Loyalty] Hook error:", err.message)
     );
 
     res.status(200).send({
