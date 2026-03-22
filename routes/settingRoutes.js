@@ -11,7 +11,9 @@ const {
   addStoreCustomizationSetting,
   getStoreCustomizationSetting,
   updateStoreCustomizationSetting,
+  getConfigStatusEndpoint,
 } = require("../controller/settingController");
+const { isAuth, isSuperAdmin } = require("../config/auth");
 
 /**
  * Global Settings
@@ -33,6 +35,7 @@ router
 
 router.get("/store-setting/keys", getStoreSecretKeys); // GET /store-setting/keys
 router.get("/store-setting/seo", getStoreSeoSetting); // GET /store-setting/seo
+router.get("/config-status", isAuth, isSuperAdmin, getConfigStatusEndpoint); // GET /config-status
 
 /**
  * Store Customization

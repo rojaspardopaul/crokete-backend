@@ -7,7 +7,7 @@ module.exports = [
       "company_name": "Crokete Pet",
       "vat_number": "47589",
       "post_code": "45000",
-      "contact": "3312345678",
+      "contact": "3310448051",
       "email": "soporte@crokete.com.mx",
       "website": "crokete.com.mx",
       "default_language": "es",
@@ -780,12 +780,12 @@ module.exports = [
         },
         "print_button": {
           "en": "Print Invoice",
-          "es": "Imprimir factura",
+          "es": "Imprimir Pedido",
           "de": "Rechnung Drucken"
         },
         "download_button": {
           "en": "Download Invoice",
-          "es": "Descargar factura",
+          "es": "Descargar Pedido",
           "de": "Download Rechnung"
         },
         "dashboard_title": {
@@ -879,9 +879,9 @@ module.exports = [
         "bottom_contact_status": true,
         "social_links_status": true,
         "shipping_card": {
-          "en": "Free Shipping From €500.00",
-          "es": "Envío gratis desde $500,00",
-          "de": "Kostenloser Versand ab 500,00 €"
+          "en": "Free Shipping From {free_shipping_threshold}",
+          "es": "Envío gratis desde {free_shipping_threshold}",
+          "de": "Kostenloser Versand ab {free_shipping_threshold}"
         },
         "support_card": {
           "en": "Support 24/7  At Anytime",

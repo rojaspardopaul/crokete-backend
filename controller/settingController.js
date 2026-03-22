@@ -1,5 +1,6 @@
 //models
 const Setting = require("../models/Setting");
+const { getConfigStatus, invalidateConfigCache } = require("../utils/getConfig");
 
 //global setting controller
 const addGlobalSetting = async (req, res) => {
@@ -180,6 +181,8 @@ const updateStoreSetting = async (req, res) => {
       { new: true, upsert: true } // upsert to create the document if it doesn't exist
     );
 
+    invalidateConfigCache();
+
     res.send({
       data: storeSetting,
       message: "Store Setting Update Successfully!",
@@ -288,6 +291,15 @@ const updateStoreCustomizationSetting = async (req, res) => {
   }
 };
 
+const getConfigStatusEndpoint = async (req, res) => {
+  try {
+    const status = await getConfigStatus();
+    res.send(status);
+  } catch (err) {
+    res.status(500).send({ message: err.message });
+  }
+};
+
 module.exports = {
   addGlobalSetting,
   getGlobalSetting,
@@ -300,4 +312,5 @@ module.exports = {
   addStoreCustomizationSetting,
   getStoreCustomizationSetting,
   updateStoreCustomizationSetting,
+  getConfigStatusEndpoint,
 };

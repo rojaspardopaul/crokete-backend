@@ -718,8 +718,8 @@
         "bottom_contact_status": true,
         "social_links_status": true,
         "shipping_card": {
-          "en": "Free Shipping From €500.00",
-          "de": "Kostenloser Versand ab 500,00 €"
+          "en": "Free Shipping From {free_shipping_threshold}",
+          "de": "Kostenloser Versand ab {free_shipping_threshold}"
         },
         "support_card": {
           "en": "Support 24/7  At Anytime",

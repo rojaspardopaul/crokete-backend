@@ -37,8 +37,9 @@ const getAllOrders = async (req, res) => {
 
   if (!status) {
     queryObject.$or = [
-      { status: { $regex: `pendiente`, $options: "i" } },
-      { status: { $regex: `procesando`, $options: "i" } },
+      { status: { $regex: `pedido`, $options: "i" } },
+      { status: { $regex: `empaquetado`, $options: "i" } },
+      { status: { $regex: `en_reparto`, $options: "i" } },
       { status: { $regex: `entregado`, $options: "i" } },
       { status: { $regex: `cancelado`, $options: "i" } },
     ];
@@ -211,8 +212,9 @@ const getDashboardRecentOrder = async (req, res) => {
     const queryObject = {};
 
     queryObject.$or = [
-      { status: { $regex: `pendiente`, $options: "i" } },
-      { status: { $regex: `procesando`, $options: "i" } },
+      { status: { $regex: `pedido`, $options: "i" } },
+      { status: { $regex: `empaquetado`, $options: "i" } },
+      { status: { $regex: `en_reparto`, $options: "i" } },
       { status: { $regex: `entregado`, $options: "i" } },
       { status: { $regex: `cancelado`, $options: "i" } },
     ];
@@ -247,11 +249,11 @@ const getDashboardCount = async (req, res) => {
 
     const totalDoc = await Order.countDocuments();
 
-    // total padding order count
+    // total pedido order count
     const totalPendingOrder = await Order.aggregate([
       {
         $match: {
-          status: "pendiente",
+          status: "pedido",
         },
       },
       {
@@ -265,11 +267,11 @@ const getDashboardCount = async (req, res) => {
       },
     ]);
 
-    // total procesando order count
+    // total empaquetado order count
     const totalProcessingOrder = await Order.aggregate([
       {
         $match: {
-          status: "procesando",
+          status: "empaquetado",
         },
       },
       {
@@ -358,7 +360,7 @@ const getDashboardAmount = async (req, res) => {
       },
       {
         $match: {
-          $or: [{ status: { $regex: "entregado", $options: "i" } }],
+          status: { $regex: "entregado", $options: "i" },
           year: { $eq: new Date().getFullYear() },
           month: { $eq: new Date().getMonth() + 1 },
           // $expr: {
@@ -408,7 +410,7 @@ const getDashboardAmount = async (req, res) => {
       },
       {
         $match: {
-          $or: [{ status: { $regex: "entregado", $options: "i" } }],
+          status: { $regex: "entregado", $options: "i" },
 
           updatedAt: { $gt: lastMonthStartDate, $lt: lastMonthEndDate },
         },
@@ -445,7 +447,7 @@ const getDashboardAmount = async (req, res) => {
     // order list last 10 days
     const orderFilteringData = await Order.find(
       {
-        $or: [{ status: { $regex: `entregado`, $options: "i" } }],
+        status: { $regex: `entregado`, $options: "i" },
         updatedAt: {
           $gte: week,
         },
@@ -580,11 +582,11 @@ const getDashboardOrders = async (req, res) => {
       },
     ]);
 
-    // total padding order count
+    // total pedido order count
     const totalPendingOrder = await Order.aggregate([
       {
         $match: {
-          status: "pendiente",
+          status: "pedido",
         },
       },
       {
@@ -598,11 +600,11 @@ const getDashboardOrders = async (req, res) => {
       },
     ]);
 
-    // total entregado order count
+    // total empaquetado order count
     const totalProcessingOrder = await Order.aggregate([
       {
         $match: {
-          status: "procesando",
+          status: "empaquetado",
         },
       },
       {
@@ -637,7 +639,7 @@ const getDashboardOrders = async (req, res) => {
     //weekly sale report
     // filter order data
     const weeklySaleReport = await Order.find({
-      $or: [{ status: { $regex: `entregado`, $options: "i" } }],
+      status: { $regex: `entregado`, $options: "i" },
       createdAt: {
         $gte: week,
       },

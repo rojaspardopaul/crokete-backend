@@ -3,44 +3,161 @@ const stripe = require("stripe");
 const Razorpay = require("razorpay");
 const MailChecker = require("mailchecker");
 const CONFIG = require("../config");
-// const stripe = require("stripe")(`${process.env.STRIPE_KEY}` || null); /// use hardcoded key if env not work
 
 const mongoose = require("mongoose");
 
 const Order = require("../models/Order");
 const Setting = require("../models/Setting");
-const { sendEmail } = require("../lib/email-sender/sender");
+const { sendEmail, sendEmailAsync } = require("../lib/email-sender/sender");
 const { formatAmountForStripe } = require("../lib/stripe/stripe");
 const { handleCreateInvoice } = require("../lib/email-sender/create");
 const { handleProductQuantity } = require("../lib/stock-controller/others");
 const customerInvoiceEmailBody = require("../lib/email-sender/templates/order-to-customer");
+const orderConfirmedEmailBody = require("../lib/email-sender/templates/order-to-customer/order-confirmed");
+const { logPaymentEvent } = require("../utils/paymentLogger");
+const { getStripeConfig } = require("../utils/getConfig");
 
 const addOrder = async (req, res) => {
-  // console.log("addOrder", req.body);
-  // console.log("req.user._id", req.user._id);
-
   try {
-    // 1️⃣ Get the latest invoice number
+    // Verify Stripe payment before saving order (prevents fraudulent orders)
+    if (req.body.paymentMethod === "Card" && req.body.stripePaymentIntentId) {
+      const { secretKey } = await getStripeConfig();
+      const stripeInstance = stripe(secretKey);
+      const paymentIntent = await stripeInstance.paymentIntents.retrieve(
+        req.body.stripePaymentIntentId
+      );
+      if (paymentIntent.status !== "succeeded") {
+        logPaymentEvent({
+          userId: req.user._id,
+          userEmail: req.body.user_info?.email,
+          event: "ORDER_CREATION_FAILED",
+          stripePaymentIntentId: req.body.stripePaymentIntentId,
+          amount: req.body.total,
+          status: "error",
+          errorMessage: `Payment not confirmed. Status: ${paymentIntent.status}`,
+          req,
+        });
+        return res.status(400).send({
+          message: "El pago no ha sido confirmado. Por favor, inténtalo de nuevo.",
+        });
+      }
+    }
+
+    // Idempotency guard: if this PaymentIntent already has an order, return it instead of creating a duplicate
+    const stripePaymentIntentId = req.body.stripePaymentIntentId || null;
+    if (stripePaymentIntentId) {
+      const existing = await Order.findOne({ stripePaymentIntentId }).lean();
+      if (existing) {
+        return res.status(200).send(existing);
+      }
+    }
+
+    // Get the latest invoice number
     const lastOrder = await Order.findOne({})
-      .sort({ invoice: -1 }) // get the order with highest invoice
+      .sort({ invoice: -1 })
       .select("invoice")
       .lean();
 
-    const nextInvoice = lastOrder ? lastOrder.invoice + 1 : 10000; // start from 10000 if no orders
+    const nextInvoice = lastOrder ? lastOrder.invoice + 1 : 10000;
 
     const newOrder = new Order({
       ...req.body,
       user: req.user._id,
       invoice: nextInvoice,
+      stripePaymentIntentId,
     });
 
-    const order = await newOrder.save();
-    // console.log("order", order);
+    let order;
+    try {
+      order = await newOrder.save();
+    } catch (saveErr) {
+      // MongoDB duplicate key on stripePaymentIntentId — order already exists (race condition)
+      if (saveErr.code === 11000 && saveErr.keyPattern?.stripePaymentIntentId) {
+        const existing = await Order.findOne({ stripePaymentIntentId }).lean();
+        if (existing) return res.status(200).send(existing);
+      }
+      throw saveErr;
+    }
+
+    logPaymentEvent({
+      orderId: order._id,
+      userId: req.user._id,
+      userEmail: req.body.user_info?.email,
+      event: "ORDER_CREATED",
+      stripePaymentIntentId: stripePaymentIntentId,
+      amount: order.total,
+      status: "success",
+      metadata: { paymentMethod: order.paymentMethod, invoice: order.invoice },
+      req,
+    });
 
     res.status(201).send(order);
     handleProductQuantity(order.cart);
+
+    // Fire-and-forget order confirmation email
+    (async () => {
+      try {
+        const setting = await Setting.findOne({ name: "storeSetting" }).lean();
+        const currency = setting?.setting?.default_currency || "$";
+        const user = order.user_info || {};
+        // Build a readable address from the new structured fields (calle, colonia, municipio, etc.)
+        // Falls back to the legacy flat "address" field if the new fields are absent.
+        let addressStr = "";
+        if (user.calle || user.colonia || user.municipio) {
+          const street = [
+            user.calle,
+            user.numExterior,
+            user.numInterior ? `Int. ${user.numInterior}` : null,
+          ].filter(Boolean).join(" ");
+          addressStr = [
+            street || null,
+            user.colonia ? `Col. ${user.colonia}` : null,
+            user.municipio,
+            user.postalCode ? `C.P. ${user.postalCode}` : null,
+            user.estado,
+            user.pais,
+          ].filter(Boolean).join(", ");
+        } else {
+          // legacy fallback
+          addressStr = [user.address, user.city, user.country, user.zipCode].filter(Boolean).join(", ");
+        }
+        const option = {
+          invoice: order.invoice,
+          name: user.name,
+          email: user.email,
+          phone: user.contact,
+          address: addressStr,
+          cart: order.cart || [],
+          subTotal: order.subTotal || 0,
+          shipping: order.shippingCost || 0,
+          discount: order.discount || 0,
+          total: order.total || 0,
+          method: order.paymentMethod,
+          currency,
+        };
+        if (user.email) {
+          await sendEmailAsync({
+            from: CONFIG.EMAIL.FROM,
+            to: user.email,
+            subject: `¡Tu pedido #${order.invoice} fue confirmado! - ${CONFIG.COMPANY.NAME}`,
+            html: orderConfirmedEmailBody(option),
+          });
+        }
+      } catch (emailErr) {
+        console.error("Order confirmation email error:", emailErr.message);
+      }
+    })();
   } catch (err) {
-    // console.log("error", err);
+    logPaymentEvent({
+      userId: req.user?._id,
+      userEmail: req.body.user_info?.email,
+      event: "ORDER_CREATION_FAILED",
+      stripePaymentIntentId: req.body.stripePaymentIntentId || null,
+      amount: req.body.total,
+      status: "error",
+      errorMessage: err.message,
+      req,
+    });
 
     res.status(500).send({
       message: err.message,
@@ -59,9 +176,12 @@ const createPaymentIntent = async (req, res) => {
     return res.status(500).json({ message: "Invalid amount." });
   }
 
-  const storeSetting = await Setting.findOne({ name: "storeSetting" });
-  const stripeSecret = storeSetting?.setting?.stripe_secret;
-  const stripeInstance = stripe(stripeSecret);
+  const { secretKey } = await getStripeConfig();
+  if (!secretKey) {
+    console.error("❌ Stripe secret key not configured. Set STRIPE_SECRET in .env or stripe_secret in Store Settings");
+    return res.status(500).json({ message: "Stripe no está configurado. Contacta al administrador." });
+  }
+  const stripeInstance = stripe(secretKey);
   if (payment_intent?.id) {
     try {
       const current_intent = await stripeInstance.paymentIntents.retrieve(
@@ -75,7 +195,17 @@ const createPaymentIntent = async (req, res) => {
             amount: formatAmountForStripe(amount, "mxn"),
           }
         );
-        // console.log("updated_intent", updated_intent);
+
+        logPaymentEvent({
+          userId: req.user?._id,
+          userEmail: email,
+          event: "PAYMENT_INTENT_UPDATED",
+          stripePaymentIntentId: payment_intent.id,
+          amount,
+          status: "success",
+          req,
+        });
+
         return res.send(updated_intent);
       }
     } catch (err) {
@@ -104,10 +234,29 @@ const createPaymentIntent = async (req, res) => {
       }, */
     };
     const payment_intent = await stripeInstance.paymentIntents.create(params);
-    // console.log("payment_intent", payment_intent);
+
+    logPaymentEvent({
+      userId: req.user?._id,
+      userEmail: email,
+      event: "PAYMENT_INTENT_CREATED",
+      stripePaymentIntentId: payment_intent.id,
+      amount,
+      status: "success",
+      req,
+    });
 
     res.send(payment_intent);
   } catch (err) {
+    logPaymentEvent({
+      userId: req.user?._id,
+      userEmail: email,
+      event: "PAYMENT_FAILED",
+      amount,
+      status: "error",
+      errorMessage: err instanceof Error ? err.message : "Internal server error",
+      req,
+    });
+
     const errorMessage =
       err instanceof Error ? err.message : "Internal server error";
     res.status(500).send({ message: errorMessage });
@@ -172,11 +321,11 @@ const getOrderCustomer = async (req, res) => {
 
     const totalDoc = await Order.countDocuments({ user: userId });
 
-    // total padding order count
+    // total pedido order count
     const totalPendingOrder = await Order.aggregate([
       {
         $match: {
-          status: { $regex: `pendiente`, $options: "i" },
+          status: { $regex: `pedido`, $options: "i" },
           user: userId,
         },
       },
@@ -191,11 +340,11 @@ const getOrderCustomer = async (req, res) => {
       },
     ]);
 
-    // total padding order count
+    // total empaquetado order count
     const totalProcessingOrder = await Order.aggregate([
       {
         $match: {
-          status: { $regex: `procesando`, $options: "i" },
+          status: { $regex: `empaquetado`, $options: "i" },
           user: userId,
         },
       },
@@ -300,8 +449,12 @@ const sendEmailInvoiceToCustomer = async (req, res) => {
       vat_number: req.body?.company_info?.vat_number,
       name: user?.name,
       email: user?.email,
-      phone: user?.phone,
-      address: user?.address,
+      phone: user?.contact,
+      address: [
+        user?.calle ? `${user.calle} ${user.numExterior || ""}${user.numInterior ? ` Int. ${user.numInterior}` : ""}` : "",
+        user?.colonia ? `${user.colonia}, ${user.municipio || ""}` : "",
+        user?.postalCode ? `Jalisco, C.P. ${user.postalCode}` : "",
+      ].filter(Boolean).join("<br/>"),
       cart: req.body.cart,
     };
 

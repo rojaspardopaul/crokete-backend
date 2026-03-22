@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
 const Category = require("../models/Category");
+const Brand = require("../models/Brand");
 const Review = require("../models/Review");
 const { languageCodes } = require("../utils/data");
 
@@ -290,11 +291,37 @@ const getShowingStoreProducts = async (req, res) => {
     }
 
     if (title) {
-      const titleQueries = languageCodes.map((lang) => ({
-        [`title.${lang}`]: { $regex: `${title}`, $options: "i" },
-      }));
+      const regex = { $regex: title, $options: "i" };
 
-      queryObject.$or = titleQueries;
+      // Search across title and description in every language, plus tags
+      const fieldQueries = languageCodes.flatMap((lang) => [
+        { [`title.${lang}`]: regex },
+        { [`description.${lang}`]: regex },
+      ]);
+      fieldQueries.push({ tag: regex });
+
+      // Parallel lookup: find brands/categories whose name matches the query
+      const [matchingBrands, matchingCategories] = await Promise.all([
+        Brand.find({
+          $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
+        }).select("_id"),
+        Category.find({
+          $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
+        }).select("_id"),
+      ]);
+
+      if (matchingBrands.length > 0) {
+        fieldQueries.push({
+          brand: { $in: matchingBrands.map((b) => b._id) },
+        });
+      }
+      if (matchingCategories.length > 0) {
+        const catIds = matchingCategories.map((c) => c._id);
+        fieldQueries.push({ category: { $in: catIds } });
+        fieldQueries.push({ categories: { $in: catIds } });
+      }
+
+      queryObject.$or = fieldQueries;
     }
     if (slug) {
       queryObject.slug = { $regex: slug, $options: "i" };

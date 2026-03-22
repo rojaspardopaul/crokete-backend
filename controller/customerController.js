@@ -410,22 +410,19 @@ const addShippingAddress = async (req, res) => {
     const customerId = req.params.id;
     const newShippingAddress = req.body;
 
-    // console.log("customerId", customerId);
+    // Build update: save shippingAddress + phone from contact
+    const updateFields = { shippingAddress: newShippingAddress };
+    if (newShippingAddress.contact) {
+      updateFields.phone = newShippingAddress.contact;
+    }
 
-    // Find the customer by ID and update the shippingAddress field
     const result = await Customer.updateOne(
       { _id: customerId },
-      {
-        $set: {
-          shippingAddress: newShippingAddress,
-        },
-      },
-      { upsert: true } // Create a new document if no document matches the filter
+      { $set: updateFields },
+      { upsert: true }
     );
 
-    // console.log("result", result);
-
-    if (result.modifiedCount > 0) {
+    if (result.matchedCount > 0 || result.upsertedCount > 0) {
       return res.send({
         message: "Shipping address added or updated successfully.",
       });

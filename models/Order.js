@@ -17,10 +17,15 @@ const orderSchema = new mongoose.Schema(
       name: String,
       email: String,
       contact: String,
-      address: String,
-      city: String,
-      country: String,
-      zipCode: String,
+      postalCode: String,
+      colonia: String,
+      calle: String,
+      numExterior: String,
+      numInterior: String,
+      municipio: String,
+      referencias: String,
+      estado: String,
+      pais: String,
     },
     subTotal: {
       type: Number,
@@ -44,19 +49,27 @@ const orderSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    stripePaymentIntentId: {
+      type: String,
+      default: null,
+      sparse: true, // allows multiple null values while enforcing uniqueness on non-null
+    },
     cardInfo: {
       type: Object,
       required: false,
     },
     status: {
       type: String,
-      enum: ["pendiente", "procesando", "entregado", "cancelado"],
+      enum: ["pedido", "empaquetado", "en_reparto", "entregado", "cancelado"],
     },
   },
   {
     timestamps: true,
   }
 );
+
+// Prevent duplicate orders for the same Stripe PaymentIntent
+orderSchema.index({ stripePaymentIntentId: 1 }, { unique: true, sparse: true });
 
 const Order = mongoose.model("Order", orderSchema);
 module.exports = Order;

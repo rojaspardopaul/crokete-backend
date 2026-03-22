@@ -7,6 +7,7 @@ const helmet = require("helmet");
 // const { Server } = require("socket.io");
 
 const { connectDB } = require("../config/db");
+const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
 const productRoutes = require("../routes/productRoutes");
 const reviewRoutes = require("../routes/reviewRoutes");
 const customerRoutes = require("../routes/customerRoutes");
@@ -24,7 +25,12 @@ const auditRoutes = require("../routes/auditRoutes");
 const petRoutes = require("../routes/petRoutes");
 const brandRoutes = require("../routes/brandRoutes");
 const loyaltyRoutes = require("../routes/loyaltyRoutes");
+const vetRoutes = require("../routes/vetRoutes");
+const paymentLogRoutes = require("../routes/paymentLogRoutes");
+const stripeWebhookRoutes = require("../routes/stripeWebhookRoutes");
 const { getPublicConfig } = require("../controller/loyaltyController");
+const { getPublicVetConfig } = require("../controller/vetConfigController");
+const { getActiveVeterinarians } = require("../controller/veterinarianController");
 const { isAuth, isAdmin } = require("../config/auth");
 // const {
 //   getGlobalSetting,
@@ -39,6 +45,10 @@ const app = express();
 // app.enable('trust proxy');
 app.set("trust proxy", 1);
 
+// Stripe webhook — must come BEFORE express.json() middleware would parse the body
+// but since we use express.raw() on the route itself, register it before general routes
+app.use("/v1/webhook", stripeWebhookRoutes);
+
 app.use(express.json({ limit: "4mb" }));
 app.use(helmet());
 
@@ -46,8 +56,10 @@ app.use(helmet());
 const corsOptions = {
   origin: [
     "http://localhost:3000",
-    "http://localhost:4100",
     "http://localhost:3001",
+    "http://localhost:4100",
+    "http://localhost:4101",
+    "http://192.168.0.14:3000",
     process.env.ADMIN_URL,
     process.env.STORE_URL,
   ].filter(Boolean),
@@ -80,10 +92,16 @@ app.use("/v1/brands/", brandRoutes);
 app.get("/v1/loyalty/public-config", getPublicConfig);
 app.use("/v1/loyalty/", isAuth, loyaltyRoutes);
 
+// Vet consultation routes
+app.get("/v1/vet/public-config", getPublicVetConfig);
+app.get("/v1/vet/veterinarians/public", getActiveVeterinarians);
+app.use("/v1/vet/", isAuth, vetRoutes);
+
 //if you not use admin dashboard then these two route will not needed.
 app.use("/v1/admin/", adminRoutes);
 app.use("/v1/orders/", isAuth, orderRoutes);
 app.use("/v1/audit/", auditRoutes);
+app.use("/v1/payment-logs/", isAuth, isAdmin, paymentLogRoutes);
 
 // Use express's default error handling middleware
 app.use((err, req, res, next) => {
@@ -101,11 +119,17 @@ app.use("/static", express.static("public"));
 
 const PORT = process.env.PORT || 5000;
 
-// const server = http.createServer(app);
-
-app.listen(PORT, () => console.log(`server running on port ${PORT}`));
-
-// app.listen(PORT, () => console.log(`server running on port ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`server running on port ${PORT}`);
+  console.log("\n📋 Configuration Diagnostics:");
+  try {
+    await syncEnvToDb();
+    await printConfigDiagnostics();
+  } catch (err) {
+    console.error("  ⚠️  Could not run config diagnostics:", err.message);
+  }
+  console.log("");
+});
 
 // set up socket
 // const io = new Server(server, {

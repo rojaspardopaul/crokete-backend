@@ -63,7 +63,7 @@ const CONFIG = {
     
     // Configuración SMTP (usar process.env en producción)
     SMTP: {
-      HOST: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      HOST: process.env.EMAIL_HOST || process.env.HOST || 'smtp.gmail.com',
       PORT: parseInt(process.env.EMAIL_PORT) || 465,
       SECURE: true,
       USER: process.env.EMAIL_USER,
