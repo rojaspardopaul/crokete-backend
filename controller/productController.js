@@ -4,6 +4,10 @@ const Category = require("../models/Category");
 const Brand = require("../models/Brand");
 const Review = require("../models/Review");
 const { languageCodes } = require("../utils/data");
+const escapeRegex = require("../utils/escapeRegex");
+const cache = require("../utils/cache");
+const { invalidateProducts, invalidateProductBySlug, invalidateAll } = require("../lib/cache/invalidation");
+const { findDescendantCategoryIds } = require("../utils/categoryHierarchy");
 
 const addProduct = async (req, res) => {
   try {
@@ -16,6 +20,7 @@ const addProduct = async (req, res) => {
     });
 
     await newProduct.save();
+    invalidateProducts();
     res.send(newProduct);
   } catch (err) {
     res.status(500).send({
@@ -29,6 +34,7 @@ const addAllProducts = async (req, res) => {
     // console.log('product data',req.body)
     await Product.deleteMany();
     await Product.insertMany(req.body);
+    invalidateAll();
     res.status(200).send({
       message: "Product Added successfully!",
     });
@@ -59,8 +65,9 @@ const getAllProducts = async (req, res) => {
   let queryObject = {};
   let sortObject = {};
   if (title) {
+    const safeTitle = escapeRegex(title);
     const titleQueries = languageCodes.map((lang) => ({
-      [`title.${lang}`]: { $regex: `${title}`, $options: "i" },
+      [`title.${lang}`]: { $regex: safeTitle, $options: "i" },
     }));
     queryObject.$or = titleQueries;
   }
@@ -95,8 +102,27 @@ const getAllProducts = async (req, res) => {
 
   // console.log('sortObject', sortObject);
 
+  let categoryFilterIds = [];
+
   if (category) {
-    queryObject.categories = category;
+    const categories = await Category.find({}).select("_id parentId").lean();
+    categoryFilterIds = findDescendantCategoryIds(categories, category);
+  }
+
+  if (categoryFilterIds.length > 0) {
+    queryObject.$and = [
+      {
+        $or: [
+          { categories: { $in: categoryFilterIds } },
+          { category: { $in: categoryFilterIds } },
+        ],
+      },
+    ];
+  }
+
+  if (queryObject.$or && queryObject.$and) {
+    queryObject.$and.unshift({ $or: queryObject.$or });
+    delete queryObject.$or;
   }
 
   const pages = Number(page);
@@ -128,10 +154,16 @@ const getAllProducts = async (req, res) => {
 };
 
 const getProductBySlug = async (req, res) => {
-  // console.log("slug", req.params.slug);
   try {
-    const product = await Product.findOne({ slug: req.params.slug });
-    res.send(product);
+    const slug = req.params.slug;
+    const cacheKey = `product:slug:${slug}`;
+
+    const { data, fromCache } = await cache.getOrFetch(cacheKey, () =>
+      Product.findOne({ slug }).lean()
+    );
+
+    cache.setCacheHeaders(res, fromCache, cache.resolveTTL(cacheKey));
+    res.send(data);
   } catch (err) {
     res.status(500).send({
       message: `Slug problem, ${err.message}`,
@@ -183,7 +215,33 @@ const updateProduct = async (req, res) => {
       product.pet = req.body.pet || null;
       product.brand = req.body.brand || null;
 
+      // ─── Extended product fields ───────────────────────────────
+      if (req.body.productType !== undefined) product.productType = req.body.productType;
+      if (req.body.petCompatibility !== undefined) product.petCompatibility = req.body.petCompatibility;
+      if (req.body.quickInfo !== undefined) product.quickInfo = req.body.quickInfo;
+      if (req.body.packageInfo !== undefined) product.packageInfo = req.body.packageInfo;
+      if (req.body.benefits !== undefined) product.benefits = { ...product.benefits, ...req.body.benefits };
+      if (req.body.features !== undefined) product.features = { ...product.features, ...req.body.features };
+      if (req.body.ingredients !== undefined) product.ingredients = { ...product.ingredients, ...req.body.ingredients };
+      if (req.body.feedingGuide !== undefined) product.feedingGuide = { ...product.feedingGuide, ...req.body.feedingGuide };
+      if (req.body.indications !== undefined) product.indications = { ...product.indications, ...req.body.indications };
+      if (req.body.warnings !== undefined) product.warnings = { ...product.warnings, ...req.body.warnings };
+      if (req.body.dosage !== undefined) product.dosage = { ...product.dosage, ...req.body.dosage };
+      if (req.body.recommendedFor !== undefined) product.recommendedFor = { ...product.recommendedFor, ...req.body.recommendedFor };
+      if (req.body.brandInfo !== undefined) product.brandInfo = { ...product.brandInfo, ...req.body.brandInfo };
+      if (req.body.nutritionTable !== undefined) product.nutritionTable = req.body.nutritionTable;
+      if (req.body.technicalSpecs !== undefined) product.technicalSpecs = req.body.technicalSpecs;
+      if (req.body.consumptionGuide !== undefined) product.consumptionGuide = req.body.consumptionGuide;
+      if (req.body.productHighlights !== undefined) product.productHighlights = req.body.productHighlights;
+      if (req.body.keyFacts !== undefined) product.keyFacts = req.body.keyFacts;
+      if (req.body.visualTags !== undefined) product.visualTags = req.body.visualTags;
+      if (req.body.iconTags !== undefined) product.iconTags = req.body.iconTags;
+
+      const oldSlug = product.slug;
       await product.save();
+      invalidateProductBySlug(oldSlug);
+      invalidateProductBySlug(req.body.slug);
+      invalidateProducts();
       res.send({ data: product, message: "Product updated successfully!" });
     } else {
       res.status(404).send({
@@ -192,7 +250,6 @@ const updateProduct = async (req, res) => {
     }
   } catch (err) {
     res.status(404).send(err.message);
-    // console.log('err',err)
   }
 };
 
@@ -221,6 +278,7 @@ const updateManyProducts = async (req, res) => {
         multi: true,
       }
     );
+    invalidateProducts();
     res.send({
       message: "Products update successfully!",
     });
@@ -240,6 +298,7 @@ const updateStatus = async (req, res) => {
       { $set: { status: newStatus } }
     );
 
+    invalidateProducts();
     res.status(200).send({
       message: `Product ${newStatus} Successfully!`,
     });
@@ -250,168 +309,12 @@ const updateStatus = async (req, res) => {
   }
 };
 
-const deleteProduct = (req, res) => {
-  Product.deleteOne({ _id: req.params.id }, (err) => {
-    if (err) {
-      res.status(500).send({
-        message: err.message,
-      });
-    } else {
-      res.status(200).send({
-        message: "Product Deleted Successfully!",
-      });
-    }
-  });
-};
-
-const getShowingStoreProducts = async (req, res) => {
-  // console.log("req.body", req);
+const deleteProduct = async (req, res) => {
   try {
-    const queryObject = { status: "show" };
-
-    // console.log("getShowingStoreProducts");
-
-    const { category, title, slug, pet, brand } = req.query;
-    // console.log("title", title);
-
-    // console.log("query", req);
-
-    if (category) {
-      queryObject.categories = {
-        $in: [category],
-      };
-    }
-
-    if (pet) {
-      queryObject.pet = pet;
-    }
-
-    if (brand) {
-      queryObject.brand = brand;
-    }
-
-    if (title) {
-      const regex = { $regex: title, $options: "i" };
-
-      // Search across title and description in every language, plus tags
-      const fieldQueries = languageCodes.flatMap((lang) => [
-        { [`title.${lang}`]: regex },
-        { [`description.${lang}`]: regex },
-      ]);
-      fieldQueries.push({ tag: regex });
-
-      // Parallel lookup: find brands/categories whose name matches the query
-      const [matchingBrands, matchingCategories] = await Promise.all([
-        Brand.find({
-          $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
-        }).select("_id"),
-        Category.find({
-          $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
-        }).select("_id"),
-      ]);
-
-      if (matchingBrands.length > 0) {
-        fieldQueries.push({
-          brand: { $in: matchingBrands.map((b) => b._id) },
-        });
-      }
-      if (matchingCategories.length > 0) {
-        const catIds = matchingCategories.map((c) => c._id);
-        fieldQueries.push({ category: { $in: catIds } });
-        fieldQueries.push({ categories: { $in: catIds } });
-      }
-
-      queryObject.$or = fieldQueries;
-    }
-    if (slug) {
-      queryObject.slug = { $regex: slug, $options: "i" };
-    }
-
-    let products = [];
-    let popularProducts = [];
-    let discountedProducts = [];
-    let relatedProducts = [];
-    let reviews = [];
-
-    if (slug) {
-      products = await Product.find(queryObject)
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(100);
-      relatedProducts = await Product.find({
-        category: products[0]?.category,
-      }).populate({ path: "category", select: "_id name" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" });
-      reviews = await Review.find({ product: products[0]._id }).populate({
-        path: "user",
-        select: "name image",
-      });
-    } else if (title || category || pet || brand) {
-      products = await Product.find(queryObject)
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(100);
-    } else {
-      products = await Product.find({ status: "show" })
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(100);
-
-      popularProducts = await Product.find({ status: "show" })
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ sales: -1 })
-        .limit(20);
-
-      discountedProducts = await Product.find({
-        status: "show", // Ensure status "show" for discounted products
-        $or: [
-          {
-            $and: [
-              { isCombination: true },
-              {
-                variants: {
-                  $elemMatch: {
-                    discount: { $gt: "0.00" },
-                  },
-                },
-              },
-            ],
-          },
-          {
-            $and: [
-              { isCombination: false },
-              {
-                $expr: {
-                  $gt: [
-                    { $toDouble: "$prices.discount" }, // Convert the discount field to a double
-                    0,
-                  ],
-                },
-              },
-            ],
-          },
-        ],
-      })
-        .populate({ path: "category", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(20);
-    }
-
-    res.send({
-      reviews,
-      products,
-      popularProducts,
-      relatedProducts,
-      discountedProducts,
+    await Product.deleteOne({ _id: req.params.id });
+    invalidateProducts();
+    res.status(200).send({
+      message: "Product Deleted Successfully!",
     });
   } catch (err) {
     res.status(500).send({
@@ -420,6 +323,219 @@ const getShowingStoreProducts = async (req, res) => {
   }
 };
 
+const getShowingStoreProducts = async (req, res) => {
+  try {
+    const { category, title, slug, pet, brand } = req.query;
+
+    // ── Validación de longitud de búsqueda ──
+    if (title && title.length > 100) {
+      return res.status(400).send({ message: "Búsqueda demasiado larga (máximo 100 caracteres)." });
+    }
+
+    // ── Admin bypass: no cachear para admins ──
+    const isAdminUser = req.user && (req.user.role === "Admin" || req.user.role === "Super Admin");
+    if (isAdminUser) {
+      cache.trackBypass();
+    }
+
+    // ── Construir cache key normalizada ──
+    let cacheKey;
+    let ttl;
+    if (slug) {
+      cacheKey = `product:slug:${slug}`;
+      ttl = 300;
+    } else if (title) {
+      cacheKey = cache.buildCacheKey("search", { title });
+      ttl = 30;
+    } else if (category || pet || brand) {
+      const filterParams = {};
+      if (category) filterParams.category = category;
+      if (pet) filterParams.pet = pet;
+      if (brand) filterParams.brand = brand;
+      cacheKey = cache.buildCacheKey("products", filterParams);
+      ttl = 60;
+    } else {
+      cacheKey = "products:home";
+      ttl = 60;
+    }
+
+    // ── Cache-first (skip para admins) ──
+    if (!isAdminUser) {
+      const { data: cached, fromCache } = await cache.getOrFetch(
+        cacheKey,
+        () => executeStoreQuery({ category, title, slug, pet, brand }),
+        ttl
+      );
+      cache.setCacheHeaders(res, fromCache, ttl);
+      return res.send(cached);
+    }
+
+    // Admin: query directa sin cache
+    const data = await executeStoreQuery({ category, title, slug, pet, brand });
+    cache.setCacheHeaders(res, false, 0, "admin");
+    res.send(data);
+  } catch (err) {
+    res.status(500).send({
+      message: err.message,
+    });
+  }
+};
+
+/**
+ * Ejecuta la query real a MongoDB para getShowingStoreProducts.
+ * Extraído para ser usado tanto en cache miss como en admin bypass.
+ */
+async function executeStoreQuery({ category, title, slug, pet, brand }) {
+  const queryObject = { status: "show" };
+  let categoryFilterIds = [];
+
+  if (category) {
+    const categories = await Category.find({ status: "show" })
+      .select("_id parentId")
+      .lean();
+    categoryFilterIds = findDescendantCategoryIds(categories, category);
+  }
+  if (pet) {
+    queryObject.pet = pet;
+  }
+  if (brand) {
+    queryObject.brand = brand;
+  }
+
+  if (title) {
+    const safeTitle = escapeRegex(title);
+    const regex = { $regex: safeTitle, $options: "i" };
+
+    const fieldQueries = languageCodes.flatMap((lang) => [
+      { [`title.${lang}`]: regex },
+      { [`description.${lang}`]: regex },
+    ]);
+    fieldQueries.push({ tag: regex });
+
+    const [matchingBrands, matchingCategories] = await Promise.all([
+      Brand.find({
+        $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
+      }).select("_id").maxTimeMS(5000),
+      Category.find({
+        $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
+      }).select("_id").maxTimeMS(5000),
+    ]);
+
+    if (matchingBrands.length > 0) {
+      fieldQueries.push({ brand: { $in: matchingBrands.map((b) => b._id) } });
+    }
+    if (matchingCategories.length > 0) {
+      const catIds = matchingCategories.map((c) => c._id);
+      fieldQueries.push({ category: { $in: catIds } });
+      fieldQueries.push({ categories: { $in: catIds } });
+    }
+
+    queryObject.$or = fieldQueries;
+  }
+
+  if (categoryFilterIds.length > 0) {
+    const categoryClause = {
+      $or: [
+        { categories: { $in: categoryFilterIds } },
+        { category: { $in: categoryFilterIds } },
+      ],
+    };
+
+    if (queryObject.$or) {
+      queryObject.$and = [{ $or: queryObject.$or }, categoryClause];
+      delete queryObject.$or;
+    } else {
+      queryObject.$or = categoryClause.$or;
+    }
+  }
+
+  if (slug) {
+    queryObject.slug = { $regex: escapeRegex(slug), $options: "i" };
+  }
+
+  let products = [];
+  let popularProducts = [];
+  let discountedProducts = [];
+  let relatedProducts = [];
+  let reviews = [];
+
+  if (slug) {
+    products = await Product.find(queryObject)
+      .populate({ path: "category", select: "name _id" })
+      .populate({ path: "pet", select: "name _id" })
+      .populate({ path: "brand", select: "name _id" })
+      .sort({ _id: -1 })
+      .limit(100)
+      .maxTimeMS(5000)
+      .lean();
+    relatedProducts = await Product.find({
+      category: products[0]?.category,
+    }).populate({ path: "category", select: "_id name" })
+      .populate({ path: "pet", select: "name _id" })
+      .populate({ path: "brand", select: "name _id" })
+      .maxTimeMS(5000)
+      .lean();
+    if (products[0]?._id) {
+      reviews = await Review.find({ product: products[0]._id, status: "approved" }).populate({
+        path: "user",
+        select: "name image",
+      }).maxTimeMS(5000).lean();
+    }
+  } else if (title || category || pet || brand) {
+    products = await Product.find(queryObject)
+      .populate({ path: "category", select: "name _id" })
+      .populate({ path: "pet", select: "name _id" })
+      .populate({ path: "brand", select: "name _id" })
+      .sort({ _id: -1 })
+      .limit(100)
+      .maxTimeMS(5000)
+      .lean();
+  } else {
+    [products, popularProducts, discountedProducts] = await Promise.all([
+      Product.find({ status: "show" })
+        .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
+        .sort({ _id: -1 })
+        .limit(100)
+        .maxTimeMS(5000)
+        .lean(),
+      Product.find({ status: "show" })
+        .populate({ path: "category", select: "name _id" })
+        .populate({ path: "pet", select: "name _id" })
+        .populate({ path: "brand", select: "name _id" })
+        .sort({ sales: -1 })
+        .limit(20)
+        .maxTimeMS(5000)
+        .lean(),
+      Product.find({
+        status: "show",
+        $or: [
+          {
+            $and: [
+              { isCombination: true },
+              { variants: { $elemMatch: { discount: { $gt: "0.00" } } } },
+            ],
+          },
+          {
+            $and: [
+              { isCombination: false },
+              { $expr: { $gt: [{ $toDouble: "$prices.discount" }, 0] } },
+            ],
+          },
+        ],
+      })
+        .populate({ path: "category", select: "name _id" })
+        .sort({ _id: -1 })
+        .limit(20)
+        .maxTimeMS(5000)
+        .lean(),
+    ]);
+  }
+
+  return { reviews, products, popularProducts, relatedProducts, discountedProducts };
+}
+
 const deleteManyProducts = async (req, res) => {
   try {
     const cname = req.cname;
@@ -427,6 +543,7 @@ const deleteManyProducts = async (req, res) => {
 
     await Product.deleteMany({ _id: req.body.ids });
 
+    invalidateProducts();
     res.send({
       message: `Products Delete Successfully!`,
     });

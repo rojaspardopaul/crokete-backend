@@ -2,12 +2,15 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
 // const path = require("path");
 // const http = require("http");
 // const { Server } = require("socket.io");
 
 const { connectDB } = require("../config/db");
 const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
+const { globalLimiter, searchLimiter, paymentLimiter } = require("../lib/security/apiRateLimiter");
+const { warmCache } = require("../lib/cache/warming");
 const productRoutes = require("../routes/productRoutes");
 const reviewRoutes = require("../routes/reviewRoutes");
 const customerRoutes = require("../routes/customerRoutes");
@@ -31,6 +34,7 @@ const stripeWebhookRoutes = require("../routes/stripeWebhookRoutes");
 const { getPublicConfig } = require("../controller/loyaltyController");
 const { getPublicVetConfig } = require("../controller/vetConfigController");
 const { getActiveVeterinarians } = require("../controller/veterinarianController");
+const aiRoutes = require("../routes/aiRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
 // const {
 //   getGlobalSetting,
@@ -50,6 +54,7 @@ app.set("trust proxy", 1);
 app.use("/v1/webhook", stripeWebhookRoutes);
 
 app.use(express.json({ limit: "4mb" }));
+app.use(mongoSanitize());
 app.use(helmet());
 
 // Configuración CORS para permitir solicitudes desde el frontend
@@ -69,6 +74,7 @@ const corsOptions = {
 
 app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
+app.use(globalLimiter);
 
 //root route
 app.get("/", (req, res) => {
@@ -76,12 +82,12 @@ app.get("/", (req, res) => {
 });
 
 //this for route will need for store front, also for admin dashboard
-app.use("/v1/products/", productRoutes);
+app.use("/v1/products/", searchLimiter, productRoutes);
 app.use("/v1/reviews/", isAuth, reviewRoutes);
 app.use("/v1/category/", categoryRoutes);
 app.use("/v1/coupon/", couponRoutes);
 app.use("/v1/customer/", customerRoutes);
-app.use("/v1/order/", isAuth, customerOrderRoutes);
+app.use("/v1/order/", isAuth, paymentLimiter, customerOrderRoutes);
 app.use("/v1/attributes/", attributeRoutes);
 app.use("/v1/setting/", settingRoutes);
 app.use("/v1/currency/", isAuth, currencyRoutes);
@@ -102,6 +108,9 @@ app.use("/v1/admin/", adminRoutes);
 app.use("/v1/orders/", isAuth, orderRoutes);
 app.use("/v1/audit/", auditRoutes);
 app.use("/v1/payment-logs/", isAuth, isAdmin, paymentLogRoutes);
+
+// AI product generation routes (admin only)
+app.use("/v1/ai/", isAuth, aiRoutes);
 
 // Use express's default error handling middleware
 app.use((err, req, res, next) => {
@@ -127,6 +136,11 @@ app.listen(PORT, async () => {
     await printConfigDiagnostics();
   } catch (err) {
     console.error("  ⚠️  Could not run config diagnostics:", err.message);
+  }
+  try {
+    await warmCache();
+  } catch (err) {
+    console.error("  ⚠️  Cache warming falló:", err.message);
   }
   console.log("");
 });

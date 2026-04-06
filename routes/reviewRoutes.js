@@ -5,19 +5,29 @@ const {
   deleteReview,
   getReviewsByProduct,
   getUserPurchasedProducts,
+  toggleHelpful,
+  getAdminReviews,
+  approveReview,
+  rejectReview,
+  getReviewStats,
 } = require("../controller/reviewController");
+const { isSuperAdmin } = require("../config/auth");
 
 const express = require("express");
 const router = express.Router();
 
-// ✅ Static and specific routes first
-router.post("/", addReview); // requires { product, rating, comment }
-//purchased products
-router.get("/purchased-products", getUserPurchasedProducts);
-router.get("/:productId", getReviewsByProduct); // list all reviews for a product
+// ── Admin routes (must be before :productId param) ──────────────────────────
+router.get("/admin", isSuperAdmin, getAdminReviews);
+router.get("/stats", isSuperAdmin, getReviewStats);
+router.put("/:id/approve", isSuperAdmin, approveReview);
+router.put("/:id/reject", isSuperAdmin, rejectReview);
 
-// ✅ Then dynamic routes
-router.put("/", updateReview); // update own review
-router.delete("/:id", deleteReview); // delete own review
+// ── Customer routes ─────────────────────────────────────────────────────────
+router.post("/", addReview);
+router.get("/purchased-products", getUserPurchasedProducts);
+router.put("/:id/helpful", toggleHelpful);
+router.get("/:productId", getReviewsByProduct);
+router.put("/", updateReview);
+router.delete("/:id", deleteReview);
 
 module.exports = router;

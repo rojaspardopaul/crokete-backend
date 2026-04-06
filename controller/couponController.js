@@ -1,6 +1,7 @@
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 dayjs.extend(utc);
+const escapeRegex = require("../utils/escapeRegex");
 
 // const { mongo_connection } = require('../config/db'); // CCDev
 const Coupon = require("../models/Coupon");
@@ -36,7 +37,7 @@ const getAllCoupons = async (req, res) => {
     const { status } = req.query;
 
     if (status) {
-      queryObject.status = { $regex: `${status}`, $options: "i" };
+      queryObject.status = { $regex: escapeRegex(status), $options: "i" };
     }
     const coupons = await Coupon.find(queryObject).sort({ _id: -1 });
     // console.log('coups',coupons)

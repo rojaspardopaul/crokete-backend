@@ -13,6 +13,7 @@ const allAccessList = [
   'coupons',
   'pets',
   'brands',
+  'reviews',
   'loyalty',
   'vet-settings',
   'vet-appointments',

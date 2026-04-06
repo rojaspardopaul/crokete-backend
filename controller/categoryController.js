@@ -1,9 +1,19 @@
 const Category = require("../models/Category");
+const Brand = require("../models/Brand");
+const Product = require("../models/Product");
+const { invalidateCategories, invalidateAll } = require("../lib/cache/invalidation");
+const {
+  buildCategoryTree,
+  normalizeId,
+  normalizeEntityId,
+  VISIBLE_STATUS_FILTER,
+} = require("../utils/categoryHierarchy");
 
 const addCategory = async (req, res) => {
   try {
     const newCategory = new Category(req.body);
     await newCategory.save();
+    invalidateCategories();
     res.status(200).send({
       message: "Category Added Successfully!",
     });
@@ -22,6 +32,7 @@ const addAllCategory = async (req, res) => {
 
     await Category.insertMany(req.body);
 
+    invalidateAll();
     res.status(200).send({
       message: "Category Added Successfully!",
     });
@@ -37,15 +48,12 @@ const addAllCategory = async (req, res) => {
 // get status show category
 const getShowingCategory = async (req, res) => {
   try {
-    // console.log("getShowingCategory");
+    const categories = await Category.find({ status: "show" }).sort({ _id: -1 }).lean();
+    const data = await buildShowingCategoryTree(categories);
 
-    const categories = await Category.find({ status: "show" }).sort({
-      _id: -1,
-    });
-
-    const categoryList = readyToParentAndChildrenCategory(categories);
-    // console.log("category list", categoryList.length);
-    res.send(categoryList);
+    // relatedBrands depends on live product-brand relations and must not be stale.
+    res.set("Cache-Control", "no-store");
+    res.send(data);
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -56,9 +64,9 @@ const getShowingCategory = async (req, res) => {
 // get all category parent and child
 const getAllCategory = async (req, res) => {
   try {
-    const categories = await Category.find({}).sort({ _id: -1 });
+    const categories = await Category.find({}).sort({ _id: -1 }).lean();
 
-    const categoryList = readyToParentAndChildrenCategory(categories);
+    const categoryList = buildCategoryTree(categories);
     //  console.log('categoryList',categoryList)
     res.send(categoryList);
   } catch (err) {
@@ -109,6 +117,7 @@ const updateCategory = async (req, res) => {
       category.parentName = req.body.parentName;
 
       await category.save();
+      invalidateCategories();
       res.send({ message: "Category Updated Successfully!" });
     }
   } catch (err) {
@@ -142,6 +151,7 @@ const updateManyCategory = async (req, res) => {
       }
     );
 
+    invalidateCategories();
     res.send({
       message: "Categories update successfully!",
     });
@@ -166,6 +176,7 @@ const updateStatus = async (req, res) => {
         },
       }
     );
+    invalidateCategories();
     res.status(200).send({
       message: `Category ${
         newStatus === "show" ? "Published" : "Un-Published"
@@ -183,6 +194,7 @@ const deleteCategory = async (req, res) => {
     console.log("id cat >>", req.params.id);
     await Category.deleteOne({ _id: req.params.id });
     await Category.deleteMany({ parentId: req.params.id });
+    invalidateCategories();
     res.status(200).send({
       message: "Category Deleted Successfully!",
     });
@@ -218,6 +230,7 @@ const deleteManyCategory = async (req, res) => {
     await Category.deleteMany({ parentId: req.body.ids });
     await Category.deleteMany({ _id: req.body.ids });
 
+    invalidateCategories();
     res.status(200).send({
       message: "Categories Deleted Successfully!",
     });
@@ -227,29 +240,100 @@ const deleteManyCategory = async (req, res) => {
     });
   }
 };
-const readyToParentAndChildrenCategory = (categories, parentId = null) => {
-  const categoryList = [];
-  let Categories;
-  if (parentId == null) {
-    Categories = categories.filter((cat) => cat.parentId == undefined);
-  } else {
-    Categories = categories.filter((cat) => cat.parentId == parentId);
+const buildShowingCategoryTree = async (categories) => {
+  const categoryTree = buildCategoryTree(categories);
+
+  if (categories.length === 0) {
+    return categoryTree;
   }
 
-  for (let cate of Categories) {
-    categoryList.push({
-      _id: cate._id,
-      name: cate.name,
-      parentId: cate.parentId,
-      parentName: cate.parentName,
-      description: cate.description,
-      icon: cate.icon,
-      status: cate.status,
-      children: readyToParentAndChildrenCategory(categories, cate._id),
-    });
+  const visibleCategoryIds = new Set(
+    categories.map((category) => normalizeId(category._id)).filter(Boolean)
+  );
+
+  const products = await Product.find({
+    brand: { $ne: null },
+    ...VISIBLE_STATUS_FILTER,
+  })
+    .select("brand categories category")
+    .lean();
+
+  const directBrandsByCategory = new Map();
+  const usedBrandIds = new Set();
+
+  for (const product of products) {
+    const productBrandId = normalizeEntityId(product.brand);
+
+    if (!productBrandId) {
+      continue;
+    }
+
+    const relatedCategoryIds = new Set(
+      [...(product.categories || []), product.category]
+        .map((value) => normalizeEntityId(value))
+        .filter((value) => value && visibleCategoryIds.has(value))
+    );
+
+    if (relatedCategoryIds.size === 0) {
+      continue;
+    }
+
+    usedBrandIds.add(productBrandId);
+
+    for (const categoryId of relatedCategoryIds) {
+      if (!directBrandsByCategory.has(categoryId)) {
+        directBrandsByCategory.set(categoryId, new Set());
+      }
+
+      directBrandsByCategory.get(categoryId).add(productBrandId);
+    }
   }
 
-  return categoryList;
+  const brands = await Brand.find({
+    _id: { $in: Array.from(usedBrandIds) },
+    ...VISIBLE_STATUS_FILTER,
+  })
+    .select("name image status")
+    .lean();
+
+  const brandById = new Map(
+    brands.map((brand) => [
+      normalizeId(brand._id),
+      {
+        _id: brand._id,
+        name: brand.name,
+        image: brand.image,
+        status: brand.status,
+      },
+    ])
+  );
+
+  return categoryTree.map((node) => decorateCategoryNode(node, directBrandsByCategory, brandById).node);
+};
+
+const decorateCategoryNode = (categoryNode, directBrandsByCategory, brandById) => {
+  const decoratedChildren = categoryNode.children.map((childNode) =>
+    decorateCategoryNode(childNode, directBrandsByCategory, brandById)
+  );
+
+  const relatedBrandIds = new Set(
+    directBrandsByCategory.get(normalizeId(categoryNode._id)) || []
+  );
+
+  for (const child of decoratedChildren) {
+    child.relatedBrandIds.forEach((brandId) => relatedBrandIds.add(brandId));
+  }
+
+  return {
+    node: {
+      ...categoryNode,
+      children: decoratedChildren.map((child) => child.node),
+      relatedBrands: Array.from(relatedBrandIds)
+        .map((brandId) => brandById.get(brandId))
+        .filter(Boolean),
+    },
+    relatedBrandIds,
+  };
 };
 
 module.exports = {

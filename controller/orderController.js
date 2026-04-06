@@ -1,5 +1,6 @@
 const Order = require("../models/Order");
 const { processOrderLoyalty } = require("./loyaltyController");
+const escapeRegex = require("../utils/escapeRegex");
 
 const getAllOrders = async (req, res) => {
   const {
@@ -47,8 +48,8 @@ const getAllOrders = async (req, res) => {
 
   if (customerName) {
     queryObject.$or = [
-      { "user_info.name": { $regex: `${customerName}`, $options: "i" } },
-      { invoice: { $regex: `${customerName}`, $options: "i" } },
+      { "user_info.name": { $regex: escapeRegex(customerName), $options: "i" } },
+      { invoice: { $regex: escapeRegex(customerName), $options: "i" } },
     ];
   }
 
@@ -57,7 +58,7 @@ const getAllOrders = async (req, res) => {
   }
 
   if (status) {
-    queryObject.status = { $regex: `${status}`, $options: "i" };
+    queryObject.status = { $regex: escapeRegex(status), $options: "i" };
   }
 
   if (startDate && endDate) {
@@ -67,7 +68,7 @@ const getAllOrders = async (req, res) => {
     };
   }
   if (method) {
-    queryObject.paymentMethod = { $regex: `${method}`, $options: "i" };
+    queryObject.paymentMethod = { $regex: escapeRegex(method), $options: "i" };
   }
 
   const pages = Number(page) || 1;

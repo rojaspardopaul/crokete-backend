@@ -1,4 +1,5 @@
 const PaymentLog = require("../models/PaymentLog");
+const escapeRegex = require("../utils/escapeRegex");
 
 const getPaymentLogs = async (req, res) => {
   try {
@@ -28,9 +29,10 @@ const getPaymentLogs = async (req, res) => {
     }
 
     if (search) {
+      const safeSearch = escapeRegex(search);
       filter.$or = [
-        { userEmail: { $regex: search, $options: "i" } },
-        { stripePaymentIntentId: { $regex: search, $options: "i" } },
+        { userEmail: { $regex: safeSearch, $options: "i" } },
+        { stripePaymentIntentId: { $regex: safeSearch, $options: "i" } },
       ];
     }
 

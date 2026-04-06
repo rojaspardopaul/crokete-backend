@@ -52,7 +52,6 @@ const orderSchema = new mongoose.Schema(
     stripePaymentIntentId: {
       type: String,
       default: null,
-      sparse: true, // allows multiple null values while enforcing uniqueness on non-null
     },
     cardInfo: {
       type: Object,
