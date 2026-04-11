@@ -35,6 +35,7 @@ const { getPublicConfig } = require("../controller/loyaltyController");
 const { getPublicVetConfig } = require("../controller/vetConfigController");
 const { getActiveVeterinarians } = require("../controller/veterinarianController");
 const aiRoutes = require("../routes/aiRoutes");
+const contactRoutes = require("../routes/contactRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
 // const {
 //   getGlobalSetting,
@@ -111,6 +112,9 @@ app.use("/v1/payment-logs/", isAuth, isAdmin, paymentLogRoutes);
 
 // AI product generation routes (admin only)
 app.use("/v1/ai/", isAuth, aiRoutes);
+
+// Contact form (public)
+app.use("/v1/contact", contactRoutes);
 
 // Use express's default error handling middleware
 app.use((err, req, res, next) => {
