@@ -53,6 +53,10 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    loyaltyCouponCode: {
+      type: String,
+      default: null,
+    },
     cardInfo: {
       type: Object,
       required: false,

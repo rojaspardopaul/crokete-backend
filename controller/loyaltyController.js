@@ -73,7 +73,7 @@ const sendLoyaltyEmail = async (emailOptions) => {
     await transporter.sendMail({
       from: CONFIG.EMAIL ? CONFIG.EMAIL.FROM : process.env.EMAIL_USER,
       to: emailOptions.email,
-      subject: `🐾 ¡Ganaste ${emailOptions.pointsEarned} puntos! - Crokete Rewards`,
+      subject: `🐾 ¡Ganaste ${emailOptions.pointsEarned} puntos! - Puntos de Recompensa`,
       html,
     });
 
