@@ -42,6 +42,8 @@ const { isAuth, isAdmin } = require("../config/auth");
 //   getStoreCustomizationSetting,
 // } = require("../lib/notification/setting");
 
+const mongoose = require("mongoose");
+
 connectDB();
 const app = express();
 
@@ -58,14 +60,18 @@ app.use(express.json({ limit: "4mb" }));
 app.use(mongoSanitize());
 app.use(helmet());
 
-// Configuración CORS para permitir solicitudes desde el frontend
+const isDev = process.env.NODE_ENV !== "production";
 const corsOptions = {
   origin: [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://localhost:4100",
-    "http://localhost:4101",
-    "http://192.168.0.14:3000",
+    ...(isDev
+      ? [
+          "http://localhost:3000",
+          "http://localhost:3001",
+          "http://localhost:4100",
+          "http://localhost:4101",
+          "http://192.168.0.14:3000",
+        ]
+      : []),
     process.env.ADMIN_URL,
     process.env.STORE_URL,
   ].filter(Boolean),
@@ -77,7 +83,15 @@ app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
 app.use(globalLimiter);
 
-//root route
+// Health check — para Cloud Run y load balancers
+app.get("/health", (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  if (dbState !== 1) {
+    return res.status(503).json({ status: "error", db: "disconnected" });
+  }
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 app.get("/", (req, res) => {
   res.send("App works properly!");
 });
@@ -116,10 +130,15 @@ app.use("/v1/ai/", isAuth, aiRoutes);
 // Contact form (public)
 app.use("/v1/contact", contactRoutes);
 
-// Use express's default error handling middleware
+// Error handler — no expone detalles internos en producción
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  res.status(400).json({ message: err.message });
+  const status = err.status || err.statusCode || 500;
+  console.error(`[ERROR] ${req.method} ${req.originalUrl} →`, err.message);
+  const message = isDev
+    ? err.message
+    : "Ocurrió un error. Por favor intenta de nuevo.";
+  res.status(status).json({ message });
 });
 
 // Serve static files from the "dist" directory
@@ -132,7 +151,7 @@ app.use("/static", express.static("public"));
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`server running on port ${PORT}`);
   console.log("\n📋 Configuration Diagnostics:");
   try {
@@ -148,6 +167,29 @@ app.listen(PORT, async () => {
   }
   console.log("");
 });
+
+// Graceful shutdown para Cloud Run (SIGTERM) y Ctrl+C (SIGINT)
+const gracefulShutdown = async (signal) => {
+  console.log(`\n${signal} recibido. Cerrando servidor...`);
+  server.close(async () => {
+    try {
+      await mongoose.connection.close();
+      console.log("MongoDB desconectado. Proceso terminado.");
+    } catch (err) {
+      console.error("Error al cerrar MongoDB:", err.message);
+    }
+    process.exit(0);
+  });
+
+  // Forzar cierre si tarda más de 10s
+  setTimeout(() => {
+    console.error("Shutdown forzado por timeout.");
+    process.exit(1);
+  }, 10_000);
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // set up socket
 // const io = new Server(server, {

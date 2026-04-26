@@ -25,6 +25,8 @@ const {
   emailVerificationLimit,
   phoneVerificationLimit,
 } = require("../lib/email-sender/sender");
+const { loginRateLimiter } = require("../lib/security/apiRateLimiter");
+const { isAuth, isSuperAdmin } = require("../config/auth");
 
 //verify email
 router.post("/verify-email", emailVerificationLimit, verifyEmailAddress);
@@ -33,28 +35,28 @@ router.post("/verify-email", emailVerificationLimit, verifyEmailAddress);
 router.post("/verify-phone", phoneVerificationLimit, verifyPhoneNumber);
 
 // shipping address send to array
-router.post("/shipping/address/:id", addShippingAddress);
+router.post("/shipping/address/:id", isAuth, addShippingAddress);
 
 // get all shipping address
-router.get("/shipping/address/:id", getShippingAddress);
+router.get("/shipping/address/:id", isAuth, getShippingAddress);
 
 // shipping address update
-router.put("/shipping/address/:userId/:shippingId", updateShippingAddress);
+router.put("/shipping/address/:userId/:shippingId", isAuth, updateShippingAddress);
 
 // shipping address delete
-router.delete("/shipping/address/:userId/:shippingId", deleteShippingAddress);
+router.delete("/shipping/address/:userId/:shippingId", isAuth, deleteShippingAddress);
 
 //register a user
-router.post("/register/:token", registerCustomer);
+router.post("/register/:token", loginRateLimiter, registerCustomer);
 
 //login a user
-router.post("/login", loginCustomer);
+router.post("/login", loginRateLimiter, loginCustomer);
 
 // refresh token
 router.post("/refresh", refreshToken);
 
 //register or login with google and fb
-router.post("/signup/oauth", signUpWithOauthProvider);
+router.post("/signup/oauth", loginRateLimiter, signUpWithOauthProvider);
 
 //forget-password
 router.put("/forget-password", passwordVerificationLimit, forgetPassword);
@@ -62,22 +64,22 @@ router.put("/forget-password", passwordVerificationLimit, forgetPassword);
 //reset-password
 router.put("/reset-password", resetPassword);
 
-//change password
-router.post("/change-password", changePassword);
+//change password — requiere auth para evitar cambiar contraseña de otro usuario
+router.post("/change-password", isAuth, changePassword);
 
-//add all users
-router.post("/add/all", addAllCustomers);
+//add all users — solo super admin (operación destructiva)
+router.post("/add/all", isAuth, isSuperAdmin, addAllCustomers);
 
-//get all user
-router.get("/", getAllCustomers);
+//get all user — solo admin
+router.get("/", isAuth, isSuperAdmin, getAllCustomers);
 
-//get a user
-router.get("/:id", getCustomerById);
+//get a user — requiere auth; el controlador valida que sea el propio usuario o admin
+router.get("/:id", isAuth, getCustomerById);
 
 //update a user
-router.put("/:id", updateCustomer);
+router.put("/:id", isAuth, updateCustomer);
 
-//delete a user
-router.delete("/:id", deleteCustomer);
+//delete a user — solo admin
+router.delete("/:id", isAuth, isSuperAdmin, deleteCustomer);
 
 module.exports = router;

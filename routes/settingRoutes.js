@@ -16,34 +16,30 @@ const {
 const { isAuth, isSuperAdmin } = require("../config/auth");
 
 /**
- * Global Settings
+ * Global Settings — GET es público (store/admin necesitan leer config)
+ * POST/PUT requieren super admin
  */
-router
-  .route("/global")
-  .post(addGlobalSetting) // POST /global
-  .get(getGlobalSetting) // GET /global
-  .put(updateGlobalSetting); // PUT /global
+router.get("/global", getGlobalSetting);
+router.post("/global", isAuth, isSuperAdmin, addGlobalSetting);
+router.put("/global", isAuth, isSuperAdmin, updateGlobalSetting);
 
 /**
- * Store Settings
+ * Store Settings — GET público, escritura requiere super admin
+ * /keys devuelve secretos: solo super admin
  */
-router
-  .route("/store-setting")
-  .post(addStoreSetting) // POST /store-setting
-  .get(getStoreSetting) // GET /store-setting
-  .put(updateStoreSetting); // PUT /store-setting
+router.get("/store-setting", getStoreSetting);
+router.post("/store-setting", isAuth, isSuperAdmin, addStoreSetting);
+router.put("/store-setting", isAuth, isSuperAdmin, updateStoreSetting);
 
-router.get("/store-setting/keys", getStoreSecretKeys); // GET /store-setting/keys
-router.get("/store-setting/seo", getStoreSeoSetting); // GET /store-setting/seo
-router.get("/config-status", isAuth, isSuperAdmin, getConfigStatusEndpoint); // GET /config-status
+router.get("/store-setting/keys", isAuth, isSuperAdmin, getStoreSecretKeys);
+router.get("/store-setting/seo", getStoreSeoSetting);
+router.get("/config-status", isAuth, isSuperAdmin, getConfigStatusEndpoint);
 
 /**
- * Store Customization
+ * Store Customization — GET público, escritura requiere super admin
  */
-router
-  .route("/store/customization")
-  .post(addStoreCustomizationSetting) // POST /store/customization
-  .get(getStoreCustomizationSetting) // GET /store/customization
-  .put(updateStoreCustomizationSetting); // PUT /store/customization
+router.get("/store/customization", getStoreCustomizationSetting);
+router.post("/store/customization", isAuth, isSuperAdmin, addStoreCustomizationSetting);
+router.put("/store/customization", isAuth, isSuperAdmin, updateStoreCustomizationSetting);
 
 module.exports = router;

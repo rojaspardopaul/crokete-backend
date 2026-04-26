@@ -36,6 +36,8 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
     discount: { type: Number, default: 0 },
+    taxRate: { type: Number, default: 16 },   // IVA % aplicado (México: 16%)
+    taxAmount: { type: Number, default: 0 },  // IVA extraído del total (precio incluye IVA)
 
     total: {
       type: Number,
@@ -73,6 +75,10 @@ const orderSchema = new mongoose.Schema(
 
 // Prevent duplicate orders for the same Stripe PaymentIntent
 orderSchema.index({ stripePaymentIntentId: 1 }, { unique: true, sparse: true });
+// Queries frecuentes: pedidos por cliente, por estado y por fecha
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
 
 const Order = mongoose.model("Order", orderSchema);
 module.exports = Order;

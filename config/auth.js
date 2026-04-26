@@ -59,15 +59,12 @@ const tokenForVerify = (user) => {
 
 const isAuth = async (req, res, next) => {
   const { authorization } = req.headers;
-  // console.log("authorization", req.headers);
-  console.log(`🔍isAuth ${req.method} : ${req.originalUrl}`);
   try {
     const token = authorization.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
-    console.log("error on isAuth", err);
 
     const message = err.name === "TokenExpiredError" 
       ? "Tu sesión ha expirado. Por favor, inicia sesión nuevamente."
@@ -82,18 +79,23 @@ const isAuth = async (req, res, next) => {
 };
 
 const isAdmin = async (req, res, next) => {
-  const admin = await Admin.findOne({ role: "Admin" });
-  if (admin) {
+  try {
+    if (!req.user) {
+      return res.status(401).send({ message: "Authentication required" });
+    }
+    // Any active entry in the Admin collection is valid — role differentiation is handled by isSuperAdmin
+    const admin = await Admin.findOne({ _id: req.user._id, status: "activo" });
+    if (!admin) {
+      return res.status(403).send({ message: "Acceso denegado. Se requieren privilegios de administrador." });
+    }
+    req.admin = admin;
     next();
-  } else {
-    res.status(401).send({
-      message: "User is not Admin",
-    });
+  } catch (err) {
+    res.status(500).send({ message: "Internal server error" });
   }
 };
 
 const isSuperAdmin = async (req, res, next) => {
-  console.log(`🔍isSuperAdmin ${req.method} : ${req.originalUrl}`);
   try {
     if (!req.user) {
       return res.status(401).send({
@@ -120,10 +122,7 @@ const isSuperAdmin = async (req, res, next) => {
     req.admin = admin;
     next();
   } catch (err) {
-    console.log("error on isSuperAdmin", err);
-    res.status(500).send({
-      message: err.message,
-    });
+    res.status(500).send({ message: "Internal server error" });
   }
 };
 

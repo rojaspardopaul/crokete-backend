@@ -98,72 +98,55 @@ const verifyPhoneNumber = async (req, res) => {
 
 const registerCustomer = async (req, res) => {
   const token = req.params.token;
-
   try {
-    const { name, email, password, phone } = jwt.decode(token);
+    // Verificar firma ANTES de usar el payload — previene tokens forjados
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY);
+    } catch {
+      return res.status(401).send({
+        message: "El enlace de verificación ha expirado o es inválido. Por favor, regístrate de nuevo.",
+      });
+    }
 
-    // Check if the user is already registered
-    const isAdded = await Customer.findOne({ email });
+    const { name, email, password, phone } = decoded;
 
-    if (isAdded) {
-      const accessToken = generateAccessToken(isAdded);
-      const refreshToken = generateRefreshToken(isAdded);
-      await isAdded.save();
-
+    // Si el usuario ya existe, devolver sesión sin exponer la contraseña
+    const existingUser = await Customer.findOne({ email });
+    if (existingUser) {
+      const accessToken = generateAccessToken(existingUser);
+      const refreshToken = generateRefreshToken(existingUser);
       return res.send({
         refreshToken,
         token: accessToken,
-        _id: isAdded._id,
-        name: isAdded.name,
-        email: isAdded.email,
-        phone: isAdded.phone,
-        password: password,
+        _id: existingUser._id,
+        name: existingUser.name,
+        email: existingUser.email,
+        phone: existingUser.phone,
         message: "¡Correo electrónico ya verificado!",
       });
     }
 
-    if (token) {
-      jwt.verify(
-        token,
-        process.env.JWT_SECRET_FOR_VERIFY,
-        async (err, decoded) => {
-          if (err) {
-            return res.status(401).send({
-              message: "El token ha expirado. ¡Por favor, inténtalo de nuevo!",
-            });
-          }
+    const newUser = new Customer({
+      name,
+      email,
+      phone,
+      password: bcrypt.hashSync(password),
+    });
+    await newUser.save();
 
-          // Create a new user only if not already registered
-          const existingUser = await Customer.findOne({ email });
-          console.log("existingUser");
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
 
-          if (existingUser) {
-            return res.status(400).send({ message: "¡El usuario ya existe!" });
-          } else {
-            const newUser = new Customer({
-              name,
-              email,
-              phone,
-              password: bcrypt.hashSync(password),
-            });
-
-            await newUser.save();
-            const accessToken = generateAccessToken(newUser);
-            const refreshToken = generateRefreshToken(newUser);
-            await newUser.save();
-            res.send({
-              refreshToken,
-              token: accessToken,
-              _id: newUser._id,
-              name: newUser.name,
-              email: newUser.email,
-              phone: newUser.phone,
-              message: "¡Correo verificado! Por favor, inicia sesión ahora.",
-            });
-          }
-        }
-      );
-    }
+    res.send({
+      refreshToken,
+      token: accessToken,
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      phone: newUser.phone,
+      message: "¡Correo verificado! Por favor, inicia sesión ahora.",
+    });
   } catch (error) {
     console.error("Error during email verification:", error);
     res.status(500).send({
@@ -284,70 +267,48 @@ const forgetPassword = async (req, res) => {
 };
 
 const resetPassword = async (req, res) => {
-  const token = req.body.token;
-  const { email } = jwt.decode(token);
-  const customer = await Customer.findOne({ email: email });
-
-  if (!token) {
-    return res.status(400).send({
-      message: "Token is required!",
-    });
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) {
+    return res.status(400).send({ message: "Token y nueva contraseña son requeridos." });
   }
-
-  if (!customer) {
-    return res.status(404).send({
-      message: "Usuario no encontrado!",
-    });
-  }
-
   try {
-    jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY, async (err, decoded) => {
-      if (err) {
-        return res.status(500).send({
-          message: "El token ha expirado, por favor intenta de nuevo!",
-        });
-      } else {
-        customer.password = bcrypt.hashSync(req.body.newPassword);
-        await customer.save();
-        res.send({
-          message: "¡Tu contraseña ha sido cambiada exitosamente! Ahora puedes iniciar sesión",
-        });
-      }
-    });
-  } catch (error) {
-    return res.status(500).send({
-      message: "Error al restablecer la contraseña",
-    });
+    // Verificar firma PRIMERO — previene bypass con tokens forjados
+    const decoded = jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY);
+    const { email } = decoded;
+
+    const customer = await Customer.findOne({ email });
+    if (!customer) {
+      return res.status(404).send({ message: "Usuario no encontrado." });
+    }
+
+    customer.password = bcrypt.hashSync(newPassword);
+    await customer.save();
+    res.send({ message: "¡Tu contraseña ha sido cambiada exitosamente! Ahora puedes iniciar sesión." });
+  } catch {
+    return res.status(401).send({ message: "El enlace ha expirado o es inválido. Por favor, solicita uno nuevo." });
   }
 };
 
 const changePassword = async (req, res) => {
   try {
-    // console.log("changePassword", req.body);
-    const customer = await Customer.findOne({ email: req.body.email });
+    // req.user viene de isAuth middleware — no se acepta email del body
+    const customer = await Customer.findById(req.user._id);
+    if (!customer) {
+      return res.status(404).send({ message: "Usuario no encontrado." });
+    }
     if (!customer.password) {
       return res.status(403).send({
-        message:
-          "For change password,You need to sign up with email & password!",
-      });
-    } else if (
-      customer &&
-      bcrypt.compareSync(req.body.currentPassword, customer.password)
-    ) {
-      customer.password = bcrypt.hashSync(req.body.newPassword);
-      await customer.save();
-      res.send({
-        message: "Your password change successfully!",
-      });
-    } else {
-      res.status(401).send({
-        message: "Invalid email or current password!",
+        message: "Para cambiar la contraseña, necesitas una cuenta con email y contraseña.",
       });
     }
+    if (!bcrypt.compareSync(req.body.currentPassword, customer.password)) {
+      return res.status(401).send({ message: "Contraseña actual incorrecta." });
+    }
+    customer.password = bcrypt.hashSync(req.body.newPassword);
+    await customer.save();
+    res.send({ message: "¡Contraseña cambiada exitosamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    res.status(500).send({ message: err.message });
   }
 };
 

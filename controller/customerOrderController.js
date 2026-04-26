@@ -1,4 +1,5 @@
 require("dotenv").config();
+const crypto = require("crypto");
 const stripe = require("stripe");
 const Razorpay = require("razorpay");
 const MailChecker = require("mailchecker");
@@ -17,10 +18,65 @@ const orderConfirmedEmailBody = require("../lib/email-sender/templates/order-to-
 const { logPaymentEvent } = require("../utils/paymentLogger");
 const { getStripeConfig } = require("../utils/getConfig");
 
+/**
+ * Calcula el IVA incluido en el total (precio con IVA incluido).
+ * taxAmount = total × taxRate / (100 + taxRate)
+ */
+const calculateTax = async (total) => {
+  const globalSetting = await Setting.findOne({ name: "globalSetting" }).lean();
+  const taxRate = Number(globalSetting?.setting?.tax_rate) || 16;
+  const taxAmount = Math.round((total * taxRate / (100 + taxRate)) * 100) / 100;
+  return { taxRate, taxAmount };
+};
+
+/**
+ * Valida el costo de envío contra las tarifas configuradas en la DB.
+ * Devuelve null si es válido, o un mensaje de error si no.
+ */
+const validateShippingCost = async (shippingCost, shippingOption, cartTotal) => {
+  const globalSetting = await Setting.findOne({ name: "globalSetting" }).lean();
+  const s = globalSetting?.setting || {};
+
+  const freeThreshold = Number(s.free_shipping_threshold) || 599;
+  const rate1 = Number(s.shipping_one_cost) || 0;
+  const rate2 = Number(s.shipping_two_cost) || 0;
+
+  const isFreeShipping = cartTotal >= freeThreshold;
+
+  if (isFreeShipping) {
+    if (Number(shippingCost) !== 0) {
+      return "El envío debería ser gratuito para este pedido.";
+    }
+    return null;
+  }
+
+  const validRates = [rate1, rate2].filter((r) => r > 0);
+
+  // Si no hay tarifas configuradas en el admin, omitir validación
+  if (validRates.length === 0) return null;
+
+  const cost = Number(shippingCost);
+  const isValid = validRates.some((r) => Math.abs(r - cost) < 0.01);
+  if (!isValid) {
+    return `Costo de envío inválido. Tarifas válidas: ${validRates.join(", ")} MXN.`;
+  }
+
+  return null;
+};
+
 const addOrder = async (req, res) => {
   try {
+    const { paymentMethod, total, subTotal, shippingCost, shippingOption, cart } = req.body;
+
+    // Validar costo de envío contra tarifas configuradas en DB
+    const cartTotal = Number(subTotal) || 0;
+    const shippingError = await validateShippingCost(shippingCost, shippingOption, cartTotal);
+    if (shippingError) {
+      return res.status(400).send({ message: shippingError });
+    }
+
     // Verify Stripe payment before saving order (prevents fraudulent orders)
-    if (req.body.paymentMethod === "Card" && req.body.stripePaymentIntentId) {
+    if (paymentMethod === "Card" && req.body.stripePaymentIntentId) {
       const { secretKey } = await getStripeConfig();
       const stripeInstance = stripe(secretKey);
       const paymentIntent = await stripeInstance.paymentIntents.retrieve(
@@ -32,13 +88,31 @@ const addOrder = async (req, res) => {
           userEmail: req.body.user_info?.email,
           event: "ORDER_CREATION_FAILED",
           stripePaymentIntentId: req.body.stripePaymentIntentId,
-          amount: req.body.total,
+          amount: total,
           status: "error",
           errorMessage: `Payment not confirmed. Status: ${paymentIntent.status}`,
           req,
         });
         return res.status(400).send({
           message: "El pago no ha sido confirmado. Por favor, inténtalo de nuevo.",
+        });
+      }
+
+      // Verificar que el monto cobrado en Stripe coincide con el total del pedido
+      const expectedAmount = formatAmountForStripe(Number(total), "mxn");
+      if (Math.abs(paymentIntent.amount - expectedAmount) > 2) {
+        logPaymentEvent({
+          userId: req.user._id,
+          userEmail: req.body.user_info?.email,
+          event: "ORDER_AMOUNT_MISMATCH",
+          stripePaymentIntentId: req.body.stripePaymentIntentId,
+          amount: total,
+          status: "error",
+          errorMessage: `PI amount ${paymentIntent.amount} != expected ${expectedAmount}`,
+          req,
+        });
+        return res.status(400).send({
+          message: "El monto del pago no corresponde al total del pedido.",
         });
       }
     }
@@ -60,11 +134,15 @@ const addOrder = async (req, res) => {
 
     const nextInvoice = lastOrder ? lastOrder.invoice + 1 : 10000;
 
+    const { taxRate, taxAmount } = await calculateTax(Number(total));
+
     const newOrder = new Order({
       ...req.body,
       user: req.user._id,
       invoice: nextInvoice,
       stripePaymentIntentId,
+      taxRate,
+      taxAmount,
     });
 
     let order;
@@ -128,9 +206,11 @@ const addOrder = async (req, res) => {
           phone: user.contact,
           address: addressStr,
           cart: order.cart || [],
-          subTotal: order.subTotal || 0,
+          subTotal: (order.cart || []).reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0),
           shipping: order.shippingCost || 0,
           discount: order.discount || 0,
+          taxRate: order.taxRate || 16,
+          taxAmount: order.taxAmount || 0,
           total: order.total || 0,
           method: order.paymentMethod,
           currency,
@@ -293,17 +373,58 @@ const createOrderByRazorPay = async (req, res) => {
 
 const addRazorpayOrder = async (req, res) => {
   try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    // Verificar firma HMAC-SHA256 de Razorpay antes de crear el pedido
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).send({ message: "Datos de verificación de pago incompletos." });
+    }
+
+    const storeSetting = await Setting.findOne({ name: "storeSetting" }).lean();
+    const razorpaySecret = storeSetting?.setting?.razorpay_secret;
+    if (!razorpaySecret) {
+      return res.status(500).send({ message: "Razorpay no está configurado." });
+    }
+
+    const expectedSignature = crypto
+      .createHmac("sha256", razorpaySecret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (expectedSignature !== razorpay_signature) {
+      logPaymentEvent({
+        userId: req.user._id,
+        userEmail: req.body.user_info?.email,
+        event: "RAZORPAY_SIGNATURE_INVALID",
+        amount: req.body.total,
+        status: "error",
+        errorMessage: "Razorpay signature mismatch",
+        req,
+      });
+      return res.status(400).send({ message: "Verificación de pago fallida." });
+    }
+
+    // Validar costo de envío
+    const shippingError = await validateShippingCost(
+      req.body.shippingCost,
+      req.body.shippingOption,
+      Number(req.body.subTotal) || 0
+    );
+    if (shippingError) return res.status(400).send({ message: shippingError });
+
+    const { taxRate, taxAmount } = await calculateTax(Number(req.body.total) || 0);
+
     const newOrder = new Order({
       ...req.body,
       user: req.user._id,
+      taxRate,
+      taxAmount,
     });
     const order = await newOrder.save();
     res.status(201).send(order);
     handleProductQuantity(order.cart);
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    res.status(500).send({ message: err.message });
   }
 };
 
@@ -436,7 +557,7 @@ const sendEmailInvoiceToCustomer = async (req, res) => {
       invoice: req.body.invoice,
       status: req.body.status,
       method: req.body.paymentMethod,
-      subTotal: req.body.subTotal,
+      subTotal: (req.body.cart || []).reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0),
       total: req.body.total,
       discount: req.body.discount,
       shipping: req.body.shippingCost,

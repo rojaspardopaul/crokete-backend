@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/c/Users/trebo/Documents/crokete/repositorios/crokete-backend/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-store/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-backend/routes//**)",
+      "Bash(grep -E \"\\\\.\\(js|jsx|ts|tsx\\)$\")",
+      "Bash(find /c/Users/trebo/Documents/crokete/repositorios/crokete-admin/nginx* -type f)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-store/src/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-backend/api/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorioscrokete-admin/src/pages/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-store/src/lib/**)",
+      "Read(//c/Users/trebo/Documents/crokete/repositorios/crokete-backend/config//**)",
+      "Read(//c/Users/crokete/repositorios/crokete-admin/src/pages/**)"
+    ]
+  }
+}

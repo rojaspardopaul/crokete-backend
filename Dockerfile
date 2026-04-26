@@ -1,21 +1,20 @@
 FROM node:18-slim
 
-# Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
+# Install dependencies (cached layer separate from source code)
 COPY package.json package-lock.json* ./
-RUN npm install --production --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 
-# Bundle app source
-COPY . .
+# Copy source with correct ownership so non-root user can read files
+COPY --chown=node:node . .
 
-# Use port 8080 for Cloud Run
+# Cloud Run requires port 8080
 ENV PORT=8080
 ENV NODE_ENV=production
 EXPOSE 8080
 
-# Run as non-root user for security
+# Run as non-root for security
 USER node
 
 CMD ["npm", "start"]

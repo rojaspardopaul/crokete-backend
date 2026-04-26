@@ -175,32 +175,28 @@ const updateOrder = async (req, res) => {
       { $set: { status: newStatus } }
     );
 
-    // Handle loyalty coupon when order is cancelled or un-cancelled (async, non-blocking)
+    // Manejar cupón de lealtad sincrónicamente para evitar race conditions
     if (newStatus === "cancelado" || previousStatus === "cancelado") {
-      (async () => {
-        try {
-          if (newStatus === "cancelado") {
-            // Re-enable the loyalty coupon that was applied to this order
-            await LoyaltyReward.findOneAndUpdate(
-              { orderId: order._id, used: true },
-              { $set: { used: false, usedAt: null, orderId: null } }
-            );
-          } else if (previousStatus === "cancelado" && order.loyaltyCouponCode) {
-            // Order was un-cancelled: re-use the coupon only if it hasn't been used in another purchase
-            await LoyaltyReward.findOneAndUpdate(
-              {
-                couponCode: order.loyaltyCouponCode,
-                customer: order.user,
-                used: false,
-                expiresAt: { $gt: new Date() },
-              },
-              { $set: { used: true, usedAt: new Date(), orderId: order._id } }
-            );
-          }
-        } catch (loyaltyErr) {
-          console.error("[Order] Coupon restore error:", loyaltyErr.message);
+      try {
+        if (newStatus === "cancelado") {
+          await LoyaltyReward.findOneAndUpdate(
+            { orderId: order._id, used: true },
+            { $set: { used: false, usedAt: null, orderId: null } }
+          );
+        } else if (previousStatus === "cancelado" && order.loyaltyCouponCode) {
+          await LoyaltyReward.findOneAndUpdate(
+            {
+              couponCode: order.loyaltyCouponCode,
+              customer: order.user,
+              used: false,
+              expiresAt: { $gt: new Date() },
+            },
+            { $set: { used: true, usedAt: new Date(), orderId: order._id } }
+          );
         }
-      })();
+      } catch (loyaltyErr) {
+        console.error("[Order] Coupon restore error:", loyaltyErr.message);
+      }
     }
 
     // Process loyalty points (async, non-blocking)
@@ -261,9 +257,11 @@ const updateOrder = async (req, res) => {
               address:  addressStr,
               date:     formattedDate,
               cart:     order.cart     || [],
-              subTotal: order.subTotal  || 0,
+              subTotal: (order.cart || []).reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0),
               shipping: order.shippingCost || 0,
               discount: order.discount  || 0,
+              taxRate:  order.taxRate   || 0,
+              taxAmount: order.taxAmount || 0,
               total:    order.total     || 0,
               method:   order.paymentMethod,
               currency,
