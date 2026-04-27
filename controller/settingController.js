@@ -92,6 +92,11 @@ const getStoreSetting = async (req, res) => {
       google_analytic_key,
       google_analytic_status,
       google_login_status,
+      google_id,
+      facebook_login_status,
+      facebook_id,
+      github_login_status,
+      github_id,
       meta_url,
       razorpay_id,
       razorpay_status,
@@ -100,8 +105,6 @@ const getStoreSetting = async (req, res) => {
       tawk_chat_property_id,
       tawk_chat_status,
       tawk_chat_widget_id,
-      facebook_login_status,
-      github_login_status,
     } = storeSetting.setting;
 
     res.send({
@@ -111,6 +114,7 @@ const getStoreSetting = async (req, res) => {
       google_analytic_key,
       google_analytic_status,
       google_login_status,
+      google_oauth_ready: !!(google_login_status && google_id),
       meta_url,
       razorpay_id,
       razorpay_status,
@@ -120,7 +124,9 @@ const getStoreSetting = async (req, res) => {
       tawk_chat_status,
       tawk_chat_widget_id,
       facebook_login_status,
+      facebook_oauth_ready: !!(facebook_login_status && facebook_id),
       github_login_status,
+      github_oauth_ready: !!(github_login_status && github_id),
     });
   } catch (err) {
     res.status(500).send({ message: err.message });
