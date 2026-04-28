@@ -13,7 +13,7 @@ const {
   updateStoreCustomizationSetting,
   getConfigStatusEndpoint,
 } = require("../controller/settingController");
-const { isAuth, isSuperAdmin } = require("../config/auth");
+const { isAuth, isSuperAdmin, isStoreInternal } = require("../config/auth");
 
 /**
  * Global Settings — GET es público (store/admin necesitan leer config)
@@ -31,7 +31,7 @@ router.get("/store-setting", getStoreSetting);
 router.post("/store-setting", isAuth, isSuperAdmin, addStoreSetting);
 router.put("/store-setting", isAuth, isSuperAdmin, updateStoreSetting);
 
-router.get("/store-setting/keys", isAuth, isSuperAdmin, getStoreSecretKeys);
+router.get("/store-setting/keys", isStoreInternal, getStoreSecretKeys);
 router.get("/store-setting/seo", getStoreSeoSetting);
 router.get("/config-status", isAuth, isSuperAdmin, getConfigStatusEndpoint);
 

@@ -183,10 +183,13 @@ const loginCustomer = async (req, res) => {
       const accessToken = generateAccessToken(customer);
       const refreshToken = generateRefreshToken(customer);
       await customer.save();
+      const { exp } = jwt.decode(accessToken);
+      const expiresIn = exp - Math.floor(Date.now() / 1000);
 
       res.send({
         refreshToken,
         token: accessToken,
+        expiresIn,
         _id: customer._id,
         name: customer.name,
         email: customer.email,
@@ -229,10 +232,12 @@ const refreshToken = async (req, res) => {
 
     // Issue new access token
     const accessToken = generateAccessToken(user);
+    const { exp } = jwt.decode(accessToken);
+    const expiresIn = exp - Math.floor(Date.now() / 1000);
 
     res.json({
       accessToken,
-      expiresIn: 900, // 15 min
+      expiresIn,
       refreshToken, // reuse old, or generateRefreshToken(user) for rotation
     });
   } catch (err) {
@@ -331,10 +336,13 @@ const signUpWithOauthProvider = async (req, res) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
     await user.save();
+    const { exp } = jwt.decode(accessToken);
+    const expiresIn = exp - Math.floor(Date.now() / 1000);
 
     res.send({
       refreshToken,
       token: accessToken,
+      expiresIn,
       _id: user._id,
       name: user.name,
       email: user.email,

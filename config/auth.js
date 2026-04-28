@@ -126,6 +126,15 @@ const isSuperAdmin = async (req, res, next) => {
   }
 };
 
+// Server-to-server auth: store's Next.js server passes NEXTAUTH_SECRET as x-internal-key
+const isStoreInternal = (req, res, next) => {
+  const key = req.headers["x-internal-key"];
+  if (!key || !process.env.NEXTAUTH_SECRET || key !== process.env.NEXTAUTH_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+};
+
 const secretKey = process.env.ENCRYPT_PASSWORD;
 
 // Ensure the secret key is exactly 32 bytes (256 bits)
@@ -153,6 +162,7 @@ module.exports = {
   isAuth,
   isAdmin,
   isSuperAdmin,
+  isStoreInternal,
   signInToken,
   tokenForVerify,
   handleEncryptData,
