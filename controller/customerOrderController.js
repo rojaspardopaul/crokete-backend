@@ -404,26 +404,6 @@ const addRazorpayOrder = async (req, res) => {
       return res.status(400).send({ message: "Verificación de pago fallida." });
     }
 
-    // Verify the payment amount matches the order total (HMAC only proves authenticity, not amount)
-    const rzp = new Razorpay({
-      key_id: storeSetting?.setting?.razorpay_id,
-      key_secret: razorpaySecret,
-    });
-    const payment = await rzp.payments.fetch(razorpay_payment_id);
-    const expectedAmount = Math.round(Number(req.body.total) * 100); // convert to paisa
-    if (Math.abs(payment.amount - expectedAmount) > 2) {
-      logPaymentEvent({
-        userId: req.user._id,
-        userEmail: req.body.user_info?.email,
-        event: "RAZORPAY_AMOUNT_MISMATCH",
-        amount: req.body.total,
-        status: "error",
-        errorMessage: `Expected ${expectedAmount} paisa, got ${payment.amount}`,
-        req,
-      });
-      return res.status(400).send({ message: "El monto del pago no coincide con el pedido." });
-    }
-
     // Validar costo de envío
     const shippingError = await validateShippingCost(
       req.body.shippingCost,
