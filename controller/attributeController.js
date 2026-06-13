@@ -6,11 +6,11 @@ const addAttribute = async (req, res) => {
     const newAttribute = new Attribute(req.body);
     await newAttribute.save();
     res.send({
-      message: "Attribute Added Successfully!",
+      message: "¡Atributo agregado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
-      message: `Error occur when adding attribute ${err.message}`,
+      message: `Error al agregar el atributo: ${err.message}`,
     });
   }
 };
@@ -24,7 +24,7 @@ const addChildAttributes = async (req, res) => {
       { $push: { variants: req.body } }
     );
     res.send({
-      message: "Attribute Value Added Successfully!",
+      message: "¡Valor de atributo agregado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -38,7 +38,7 @@ const addAllAttributes = async (req, res) => {
     await Attribute.deleteMany();
     await Attribute.insertMany(req.body);
     res.send({
-      message: "Added all attributes successfully!",
+      message: "¡Atributos agregados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -126,7 +126,7 @@ const updateManyAttribute = async (req, res) => {
     );
 
     res.send({
-      message: "Attributes update successfully!",
+      message: "¡Atributos actualizados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -184,7 +184,7 @@ const updateAttributes = async (req, res) => {
     }
     await attribute.save();
     res.send({
-      message: "Attribute updated successfully!",
+      message: "¡Atributo actualizado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -223,7 +223,7 @@ const updateChildAttributes = async (req, res) => {
     }
 
     res.send({
-      message: "Attribute Value Updated Successfully!",
+      message: "¡Valor de atributo actualizado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -291,7 +291,7 @@ const updateManyChildAttribute = async (req, res) => {
     }
 
     res.send({
-      message: "Attribute Values update successfully!",
+      message: "¡Valores de atributo actualizados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -312,9 +312,7 @@ const updateStatus = async (req, res) => {
       }
     );
     res.status(200).send({
-      message: `Attribute ${
-        newStatus === "show" ? "Published" : "Un-Published"
-      } Successfully!`,
+      message: `Atributo ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -336,9 +334,7 @@ const updateChildStatus = async (req, res) => {
       }
     );
     res.status(200).send({
-      message: `Attribute Value ${
-        newStatus === "show" ? "Published" : "Un-Published"
-      } Successfully!`,
+      message: `Valor de atributo ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -351,7 +347,7 @@ const deleteAttribute = async (req, res) => {
   try {
     await Attribute.deleteOne({ _id: req.params.id });
     res.send({
-      message: "Attribute Deleted Successfully!",
+      message: "¡Atributo eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -371,7 +367,7 @@ const deleteChildAttribute = async (req, res) => {
 
     await handleProductAttribute(attributeId, childId);
     res.send({
-      message: "Attribute Value Deleted Successfully!",
+      message: "¡Valor de atributo eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -385,7 +381,7 @@ const deleteManyAttribute = async (req, res) => {
     await Attribute.deleteMany({ _id: req.body.ids });
     // console.log('delete many attribute');
     res.send({
-      message: `Attributes Delete Successfully!`,
+      message: `¡Atributos eliminados correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -408,7 +404,7 @@ const deleteManyChildAttribute = async (req, res) => {
 
     await handleProductAttribute(req.body.id, req.body.ids, "multi");
     res.send({
-      message: `Attribute Values Delete Successfully!`,
+      message: `¡Valores de atributo eliminados correctamente!`,
     });
   } catch (err) {
     res.status(500).send({

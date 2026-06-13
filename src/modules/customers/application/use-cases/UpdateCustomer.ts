@@ -30,7 +30,7 @@ export class UpdateCustomer {
     if (body.email) {
       const ownerId = await this.customers.findIdByEmail(body.email);
       if (ownerId && ownerId !== id) {
-        return Result.fail(new ValidationError("Email already exists."));
+        return Result.fail(new ValidationError("El correo electrónico ya está registrado."));
       }
     }
 
@@ -47,7 +47,7 @@ export class UpdateCustomer {
       address: snap.address,
       phone: snap.phone,
       image: snap.image,
-      message: "Customer updated successfully!",
+      message: "¡Cliente actualizado correctamente!",
     });
   }
 }

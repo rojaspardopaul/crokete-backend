@@ -51,10 +51,10 @@ export class CustomerController {
   setShippingAddress = async (req: Request, res: Response): Promise<void> => {
     const result = await this.setShippingUC.execute(req.params.id as string, req.body);
     if (result.isFail) {
-      res.status(404).send({ message: "Customer not found." });
+      res.status(404).send({ message: "Cliente no encontrado." });
       return;
     }
-    res.send({ message: "Shipping address added or updated successfully." });
+    res.send({ message: "¡Dirección de envío guardada correctamente!" });
   };
 
   getShippingAddress = async (req: Request, res: Response): Promise<void> => {

@@ -14,14 +14,14 @@ const addNotification = async (req, res) => {
         const newNotification = new Notification(req.body);
         await newNotification.save();
         res.status(200).send({
-          message: "Notification save successfully!",
+          message: "¡Notificación guardada correctamente!",
         });
       }
     } else {
       const newNotification = new Notification(req.body);
       await newNotification.save();
       res.status(200).send({
-        message: "Notification save successfully!",
+        message: "¡Notificación guardada correctamente!",
       });
     }
   } catch (err) {
@@ -99,7 +99,7 @@ const updateManyStatusNotification = async (req, res) => {
     );
 
     res.send({
-      message: "Notification update successfully!",
+      message: "¡Notificación actualizada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -117,7 +117,7 @@ const deleteNotificationById = async (req, res) => {
         });
       } else {
         res.send({
-          message: "Notification deleted successfully!",
+          message: "¡Notificación eliminada correctamente!",
         });
       }
     });
@@ -137,7 +137,7 @@ const deleteNotificationByProductId = async (req, res) => {
         });
       } else {
         res.send({
-          message: "Notification deleted successfully!",
+          message: "¡Notificación eliminada correctamente!",
         });
       }
     });
@@ -153,7 +153,7 @@ const deleteManyNotification = async (req, res) => {
     await Notification.deleteMany({ _id: req.body.ids });
 
     res.send({
-      message: `Notification Delete Successfully!`,
+      message: `¡Notificación eliminada correctamente!`,
     });
   } catch (err) {
     res.status(500).send({

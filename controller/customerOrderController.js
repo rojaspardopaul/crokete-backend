@@ -253,7 +253,7 @@ const createPaymentIntent = async (req, res) => {
   const min = Number(process.env.MIN_AMOUNT) || 1;
   const max = Number(process.env.MAX_AMOUNT) || 1_000_000;
   if (amount < min || amount > max) {
-    return res.status(500).json({ message: "Invalid amount." });
+    return res.status(500).json({ message: "Monto no válido." });
   }
 
   const { secretKey } = await getStripeConfig();
@@ -361,7 +361,7 @@ const createOrderByRazorPay = async (req, res) => {
 
     if (!order)
       return res.status(500).send({
-        message: "Error occurred when creating order!",
+        message: "¡Ocurrió un error al crear el pedido!",
       });
     res.send(order);
   } catch (err) {

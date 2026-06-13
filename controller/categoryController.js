@@ -15,7 +15,7 @@ const addCategory = async (req, res) => {
     await newCategory.save();
     invalidateCategories();
     res.status(200).send({
-      message: "Category Added Successfully!",
+      message: "¡Categoría agregada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -34,7 +34,7 @@ const addAllCategory = async (req, res) => {
 
     invalidateAll();
     res.status(200).send({
-      message: "Category Added Successfully!",
+      message: "¡Categoría agregada correctamente!",
     });
   } catch (err) {
     // console.log(err.message);
@@ -118,7 +118,7 @@ const updateCategory = async (req, res) => {
 
       await category.save();
       invalidateCategories();
-      res.send({ message: "Category Updated Successfully!" });
+      res.send({ message: "¡Categoría actualizada correctamente!" });
     }
   } catch (err) {
     res.status(500).send({
@@ -153,7 +153,7 @@ const updateManyCategory = async (req, res) => {
 
     invalidateCategories();
     res.send({
-      message: "Categories update successfully!",
+      message: "¡Categorías actualizadas correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -178,9 +178,7 @@ const updateStatus = async (req, res) => {
     );
     invalidateCategories();
     res.status(200).send({
-      message: `Category ${
-        newStatus === "show" ? "Published" : "Un-Published"
-      } Successfully!`,
+      message: `Categoría ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -196,7 +194,7 @@ const deleteCategory = async (req, res) => {
     await Category.deleteMany({ parentId: req.params.id });
     invalidateCategories();
     res.status(200).send({
-      message: "Category Deleted Successfully!",
+      message: "¡Categoría eliminada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -215,7 +213,7 @@ const deleteCategory = async (req, res) => {
   //       res.status(500).send({ message: err.message });
   //     } else {
   //       res.status(200).send({
-  //         message: 'Category Deleted Successfully!',
+  //         message: '¡Categoría eliminada correctamente!',
   //       });
   //     }
   //   }
@@ -232,7 +230,7 @@ const deleteManyCategory = async (req, res) => {
 
     invalidateCategories();
     res.status(200).send({
-      message: "Categories Deleted Successfully!",
+      message: "¡Categorías eliminadas correctamente!",
     });
   } catch (err) {
     res.status(500).send({

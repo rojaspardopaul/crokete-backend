@@ -62,7 +62,7 @@ export class AdminOrderController {
   update = async (req: Request, res: Response): Promise<void> => {
     const status = req.body.status as string;
     if (!ORDER_STATUSES.includes(status as OrderStatus)) {
-      res.status(400).send({ message: "Estado de pedido inválido." });
+      res.status(400).send({ message: "Estado de pedido no válido." });
       return;
     }
     const result = await this.updateStatusUC.execute(
@@ -74,15 +74,15 @@ export class AdminOrderController {
       res.status(toHttpStatus(err)).send({ message: err.message });
       return;
     }
-    res.status(200).send({ message: "Order Updated Successfully!" });
+    res.status(200).send({ message: "¡Pedido actualizado correctamente!" });
   };
 
   remove = async (req: Request, res: Response): Promise<void> => {
     try {
       await this.deleteOrderUC.execute(req.params.id as string);
-      res.status(200).send({ message: "Order Deleted Successfully!" });
+      res.status(200).send({ message: "¡Pedido eliminado correctamente!" });
     } catch (err) {
-      res.status(500).send({ message: (err as Error).message || "Error deleting order" });
+      res.status(500).send({ message: (err as Error).message || "Error al eliminar el pedido" });
     }
   };
 }

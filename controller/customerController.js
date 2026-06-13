@@ -50,7 +50,7 @@ const verifyPhoneNumber = async (req, res) => {
   // Check if phone number is provided and is in the correct format
   if (!phoneNumber) {
     return res.status(400).send({
-      message: "Phone number is required.",
+      message: "El número de teléfono es requerido.",
     });
   }
 
@@ -58,7 +58,7 @@ const verifyPhoneNumber = async (req, res) => {
   // const phoneRegex = /^[0-9]{10}$/; // Basic validation for 10-digit phone numbers
   // if (!phoneRegex.test(phoneNumber)) {
   //   return res.status(400).send({
-  //     message: "Invalid phone number format. Please provide a valid number.",
+  //     message: "Formato de teléfono no válido. Proporciona un número válido.",
   //   });
   // }
 
@@ -68,7 +68,7 @@ const verifyPhoneNumber = async (req, res) => {
 
     if (isAdded) {
       return res.status(403).send({
-        message: "This phone number is already added.",
+        message: "Este número de teléfono ya está registrado.",
       });
     }
 
@@ -82,11 +82,11 @@ const verifyPhoneNumber = async (req, res) => {
 
     if (!sent) {
       return res.status(500).send({
-        message: "Failed to send verification code.",
+        message: "No se pudo enviar el código de verificación.",
       });
     }
 
-    const message = "Please check your phone for the verification code!";
+    const message = "¡Revisa tu teléfono para ver el código de verificación!";
     return res.send({ message });
   } catch (err) {
     console.error("Error during phone verification:", err);
@@ -160,7 +160,7 @@ const addAllCustomers = async (req, res) => {
     await Customer.deleteMany();
     await Customer.insertMany(req.body);
     res.send({
-      message: "Added all users successfully!",
+      message: "¡Clientes agregados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -215,7 +215,7 @@ const refreshToken = async (req, res) => {
   const { refreshToken } = req.body;
 
   if (!refreshToken) {
-    return res.status(401).json({ message: "Refresh token required" });
+    return res.status(401).json({ message: "Se requiere el token de actualización" });
   }
 
   try {
@@ -223,11 +223,11 @@ const refreshToken = async (req, res) => {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
     const user = await Customer.findById(decoded.id);
-    if (!user) return res.status(401).json({ message: "User not found" });
+    if (!user) return res.status(401).json({ message: "Usuario no encontrado" });
 
     // (Optional) check against DB if you store refresh tokens
     // if (user.refreshToken !== refreshToken) {
-    //   return res.status(401).json({ message: "Invalid refresh token" });
+    //   return res.status(401).json({ message: "Token de actualización no válido" });
     // }
 
     // Issue new access token
@@ -241,7 +241,7 @@ const refreshToken = async (req, res) => {
       refreshToken, // reuse old, or generateRefreshToken(user) for rotation
     });
   } catch (err) {
-    return res.status(401).json({ message: "Invalid refresh token" });
+    return res.status(401).json({ message: "Token de actualización no válido" });
   }
 };
 
@@ -249,7 +249,7 @@ const forgetPassword = async (req, res) => {
   const isAdded = await Customer.findOne({ email: req.body.email });
   if (!isAdded) {
     return res.status(404).send({
-      message: "User Not found with this email!",
+      message: "No se encontró un usuario con ese correo electrónico.",
     });
   } else {
     const token = tokenForVerify(isAdded);
@@ -266,7 +266,7 @@ const forgetPassword = async (req, res) => {
       html: forgetPasswordEmailBody(option),
     };
 
-    const message = "Please check your email to reset password!";
+    const message = "¡Revisa tu correo electrónico para restablecer tu contraseña!";
     sendEmail(body, res, message);
   }
 };
@@ -393,10 +393,10 @@ const addShippingAddress = async (req, res) => {
 
     if (result.matchedCount > 0 || result.upsertedCount > 0) {
       return res.send({
-        message: "Shipping address added or updated successfully.",
+        message: "¡Dirección de envío guardada correctamente!",
       });
     } else {
-      return res.status(404).send({ message: "Customer not found." });
+      return res.status(404).send({ message: "Cliente no encontrado." });
     }
   } catch (err) {
     res.status(500).send({
@@ -424,7 +424,7 @@ const getShippingAddress = async (req, res) => {
 
     //   if (!address) {
     //     return res.status(404).send({
-    //       message: "Shipping address not found!",
+    //       message: "¡Dirección de envío no encontrada!",
     //     });
     //   }
 
@@ -451,7 +451,7 @@ const updateShippingAddress = async (req, res) => {
       customer.shippingAddress.push(req.body);
 
       await customer.save();
-      res.send({ message: "Success" });
+      res.send({ message: "¡Listo!" });
     }
   } catch (err) {
     res.status(500).send({
@@ -475,7 +475,7 @@ const deleteShippingAddress = async (req, res) => {
       }
     );
 
-    res.send({ message: "Shipping Address Deleted Successfully!" });
+    res.send({ message: "¡Dirección de envío eliminada correctamente!" });
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -489,7 +489,7 @@ const updateCustomer = async (req, res) => {
 
     const customer = await Customer.findById(req.params.id);
     if (!customer) {
-      return res.status(404).send({ message: "Customer not found!" });
+      return res.status(404).send({ message: "¡Cliente no encontrado!" });
     }
 
     const existingCustomer = await Customer.findOne({ email });
@@ -497,7 +497,7 @@ const updateCustomer = async (req, res) => {
       existingCustomer &&
       existingCustomer._id.toString() !== customer._id.toString()
     ) {
-      return res.status(400).send({ message: "Email already exists." });
+      return res.status(400).send({ message: "El correo electrónico ya está registrado." });
     }
 
     customer.name = name;
@@ -521,7 +521,7 @@ const updateCustomer = async (req, res) => {
       address: customer.address,
       phone: customer.phone,
       image: customer.image,
-      message: "Customer updated successfully!",
+      message: "¡Cliente actualizado correctamente!",
     });
   } catch (err) {
     res.status(500).send({ message: err.message });
@@ -534,12 +534,12 @@ const deleteCustomer = async (req, res) => {
 
     if (result.deletedCount === 0) {
       return res.status(404).send({
-        message: "User not found",
+        message: "Usuario no encontrado",
       });
     }
 
     res.status(200).send({
-      message: "User Deleted Successfully!",
+      message: "¡Usuario eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({

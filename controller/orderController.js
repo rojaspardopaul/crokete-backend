@@ -161,7 +161,7 @@ const updateOrder = async (req, res) => {
     // Get the current order to know previous status
     const order = await Order.findById(req.params.id);
     if (!order) {
-      return res.status(404).send({ message: "Order not found" });
+      return res.status(404).send({ message: "Pedido no encontrado" });
     }
     const previousStatus = order.status;
 
@@ -176,11 +176,11 @@ const updateOrder = async (req, res) => {
     await applyStatusChangeEffects(order, newStatus, previousStatus);
 
     res.status(200).send({
-      message: "Order Updated Successfully!",
+      message: "¡Pedido actualizado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
-      message: err.message || "Error updating order",
+      message: err.message || "Error al actualizar el pedido",
     });
   }
 };
@@ -190,11 +190,11 @@ const deleteOrder = async (req, res) => {
     await Order.deleteOne({ _id: req.params.id });
 
     res.status(200).send({
-      message: "Order Deleted Successfully!",
+      message: "¡Pedido eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
-      message: err.message || "Error deleting order",
+      message: err.message || "Error al eliminar el pedido",
     });
   }
 };

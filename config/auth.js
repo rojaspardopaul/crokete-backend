@@ -81,7 +81,7 @@ const isAuth = async (req, res, next) => {
 const isAdmin = async (req, res, next) => {
   try {
     if (!req.user) {
-      return res.status(401).send({ message: "Authentication required" });
+      return res.status(401).send({ message: "Autenticación requerida" });
     }
     // Any active entry in the Admin collection is valid — role differentiation is handled by isSuperAdmin
     const admin = await Admin.findOne({ _id: req.user._id, status: "activo" });
@@ -91,7 +91,7 @@ const isAdmin = async (req, res, next) => {
     req.admin = admin;
     next();
   } catch (err) {
-    res.status(500).send({ message: "Internal server error" });
+    res.status(500).send({ message: "Error interno del servidor" });
   }
 };
 
@@ -99,7 +99,7 @@ const isSuperAdmin = async (req, res, next) => {
   try {
     if (!req.user) {
       return res.status(401).send({
-        message: "Authentication required",
+        message: "Autenticación requerida",
       });
     }
 
@@ -108,13 +108,13 @@ const isSuperAdmin = async (req, res, next) => {
     
     if (!admin) {
       return res.status(404).send({
-        message: "Admin not found",
+        message: "Administrador no encontrado",
       });
     }
 
     if (admin.role !== "super admin") {
       return res.status(403).send({
-        message: "Access denied. Super Admin privileges required.",
+        message: "Acceso denegado. Se requieren privilegios de super administrador.",
       });
     }
 
@@ -122,7 +122,7 @@ const isSuperAdmin = async (req, res, next) => {
     req.admin = admin;
     next();
   } catch (err) {
-    res.status(500).send({ message: "Internal server error" });
+    res.status(500).send({ message: "Error interno del servidor" });
   }
 };
 
@@ -130,7 +130,7 @@ const isSuperAdmin = async (req, res, next) => {
 const isStoreInternal = (req, res, next) => {
   const key = req.headers["x-internal-key"];
   if (!key || !process.env.NEXTAUTH_SECRET || key !== process.env.NEXTAUTH_SECRET) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "No autorizado" });
   }
   next();
 };

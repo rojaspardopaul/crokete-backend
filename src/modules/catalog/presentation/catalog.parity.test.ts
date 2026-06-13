@@ -88,7 +88,7 @@ describe("catalog router (HTTP parity)", () => {
       .patch(`/products/${id}`)
       .send({ title: { en: "Premium" } });
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe("Product updated successfully!");
+    expect(res.body.message).toBe("¡Producto actualizado correctamente!");
     expect(res.body.data.title).toEqual({ es: "Pienso", en: "Premium" });
   });
 
@@ -131,7 +131,7 @@ describe("catalog router (HTTP parity)", () => {
       .put(`/products/status/${created.body._id}`)
       .send({ status: "hide" });
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe("Product hide Successfully!");
+    expect(res.body.message).toBe("¡Producto ocultado correctamente!");
   });
 
   it("DELETE /products/:id removes the product", async () => {
@@ -177,7 +177,7 @@ describe("catalog router (HTTP parity)", () => {
       .patch("/products/update/many")
       .send({ ids: [a.body._id, b.body._id], tag: ["promo"] });
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe("Products update successfully!");
+    expect(res.body.message).toBe("¡Productos actualizados correctamente!");
   });
 
   it("POST /products/all bulk-replaces the catalog", async () => {

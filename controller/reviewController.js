@@ -165,7 +165,7 @@ const getUserPurchasedProducts = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching purchased products:", error.message);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ success: false, message: "Error del servidor" });
   }
 };
 
@@ -206,7 +206,7 @@ const updateReview = async (req, res) => {
       { new: true }
     );
 
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    if (!review) return res.status(404).json({ error: "Reseña no encontrada" });
 
     // Re-run AI moderation in background
     let productName = "";
@@ -246,11 +246,11 @@ const deleteReview = async (req, res) => {
     const user = req.user._id;
 
     const review = await Review.findOneAndDelete({ _id: id, user });
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    if (!review) return res.status(404).json({ error: "Reseña no encontrada" });
 
     await updateProductRating(review.product);
     invalidateReviews();
-    res.json({ message: "Review deleted" });
+    res.json({ message: "Reseña eliminada" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -264,7 +264,7 @@ const toggleHelpful = async (req, res) => {
       { $inc: { helpfulVotes: 1 } },
       { new: true }
     );
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    if (!review) return res.status(404).json({ error: "Reseña no encontrada" });
     res.json({ helpfulVotes: review.helpfulVotes });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -348,7 +348,7 @@ const approveReview = async (req, res) => {
       { new: true }
     );
 
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    if (!review) return res.status(404).json({ error: "Reseña no encontrada" });
 
     await updateProductRating(review.product);
     invalidateReviews();
@@ -372,7 +372,7 @@ const rejectReview = async (req, res) => {
       { new: true }
     );
 
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    if (!review) return res.status(404).json({ error: "Reseña no encontrada" });
 
     await updateProductRating(review.product);
     invalidateReviews();

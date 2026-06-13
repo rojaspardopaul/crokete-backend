@@ -10,7 +10,7 @@ const addCoupon = async (req, res) => {
   try {
     const newCoupon = new Coupon(req.body);
     await newCoupon.save();
-    res.send({ message: "Coupon Added Successfully!" });
+    res.send({ message: "¡Cupón agregado correctamente!" });
   } catch (err) {
     res.status(500).send({ message: err.message });
   }
@@ -21,7 +21,7 @@ const addAllCoupon = async (req, res) => {
     await Coupon.deleteMany();
     await Coupon.insertMany(req.body);
     res.status(200).send({
-      message: "Coupon Added successfully!",
+      message: "¡Cupón agregado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -91,10 +91,10 @@ const updateCoupon = async (req, res) => {
       coupon.logo = req.body.logo;
 
       await coupon.save();
-      res.send({ message: "Coupon Updated Successfully!" });
+      res.send({ message: "¡Cupón actualizado correctamente!" });
     }
   } catch (err) {
-    res.status(404).send({ message: "Coupon not found!" });
+    res.status(404).send({ message: "¡Cupón no encontrado!" });
   }
 };
 
@@ -115,7 +115,7 @@ const updateManyCoupons = async (req, res) => {
     );
 
     res.send({
-      message: "Coupons update successfully!",
+      message: "¡Cupones actualizados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -137,9 +137,7 @@ const updateStatus = async (req, res) => {
       }
     );
     res.status(200).send({
-      message: `Coupon ${
-        newStatus === "show" ? "Published" : "Un-Published"
-      } Successfully!`,
+      message: `Cupón ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -154,7 +152,7 @@ const deleteCoupon = async (req, res) => {
 
     await Coupon.deleteOne({ _id: req.params.id });
     res.status(200).send({
-      message: "Coupon Deleted Successfully!",
+      message: "¡Cupón eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({ message: err.message });
@@ -165,7 +163,7 @@ const deleteManyCoupons = async (req, res) => {
   try {
     await Coupon.deleteMany({ _id: req.body.ids });
     res.send({
-      message: `Coupons Delete Successfully!`,
+      message: `¡Cupones eliminados correctamente!`,
     });
   } catch (err) {
     res.status(500).send({

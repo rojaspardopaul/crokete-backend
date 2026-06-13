@@ -106,7 +106,7 @@ export class ProductController {
   addAll = async (req: Request, res: Response): Promise<void> => {
     try {
       await this.replaceAllUC.execute(req.body ?? []);
-      res.status(200).send({ message: "Product Added successfully!" });
+      res.status(200).send({ message: "¡Productos agregados correctamente!" });
     } catch (err) {
       res.status(500).send({ message: (err as Error).message });
     }
@@ -115,7 +115,7 @@ export class ProductController {
   updateMany = async (req: Request, res: Response): Promise<void> => {
     try {
       await this.updateManyUC.execute(req.body.ids ?? [], req.body ?? {});
-      res.send({ message: "Products update successfully!" });
+      res.send({ message: "¡Productos actualizados correctamente!" });
     } catch (err) {
       res.status(500).send({ message: (err as Error).message });
     }
@@ -153,20 +153,22 @@ export class ProductController {
       parsed.data
     );
     if (result.isFail) return this.fail(res, result.getError());
-    res.send({ data: result.getValue(), message: "Product updated successfully!" });
+    res.send({ data: result.getValue(), message: "¡Producto actualizado correctamente!" });
   };
 
   updateStatus = async (req: Request, res: Response): Promise<void> => {
     const status = req.body.status === "hide" ? "hide" : "show";
     const result = await this.changeStatus.execute(req.params.id as string, status);
     if (result.isFail) return this.fail(res, result.getError());
-    res.status(200).send({ message: `Product ${status} Successfully!` });
+    res.status(200).send({
+      message: `¡Producto ${status === "show" ? "publicado" : "ocultado"} correctamente!`,
+    });
   };
 
   remove = async (req: Request, res: Response): Promise<void> => {
     try {
       await this.deleteProductUC.execute(req.params.id as string);
-      res.status(200).send({ message: "Product Deleted Successfully!" });
+      res.status(200).send({ message: "¡Producto eliminado correctamente!" });
     } catch (err) {
       res.status(500).send({ message: (err as Error).message });
     }
@@ -175,7 +177,7 @@ export class ProductController {
   removeMany = async (req: Request, res: Response): Promise<void> => {
     try {
       await this.deleteProductUC.executeMany(req.body.ids ?? []);
-      res.send({ message: "Products Delete Successfully!" });
+      res.send({ message: "¡Productos eliminados correctamente!" });
     } catch (err) {
       res.status(500).send({ message: (err as Error).message });
     }

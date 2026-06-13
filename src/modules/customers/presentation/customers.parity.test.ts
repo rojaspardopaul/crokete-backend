@@ -105,7 +105,7 @@ describe("customers router (ported routes + fall-through)", () => {
       .post("/customer/shipping/address/650000000000000000000001")
       .send({ calle: "Reforma", contact: "555" });
     expect(res.status).toBe(200);
-    expect(res.body.message).toMatch(/shipping address/i);
+    expect(res.body.message).toMatch(/dirección de envío/i);
   });
 
   it("GET /shipping/address/:id returns the address", async () => {

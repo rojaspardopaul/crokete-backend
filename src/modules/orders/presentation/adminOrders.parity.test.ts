@@ -83,7 +83,7 @@ describe("admin orders router (HTTP parity)", () => {
       .put("/orders/650000000000000000000001")
       .send({ status: "empaquetado" });
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe("Order Updated Successfully!");
+    expect(res.body.message).toBe("¡Pedido actualizado correctamente!");
     expect(effects.onStatusChanged).toHaveBeenCalledWith(
       expect.objectContaining({ status: "empaquetado" }),
       "empaquetado",

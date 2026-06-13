@@ -7,7 +7,7 @@ const addCurrency = async (req, res) => {
       const newCurrency = new Currencie(req.body);
       await newCurrency.save();
       res.send({
-        message: 'Currency added successfully!',
+        message: '¡Moneda agregada correctamente!',
       });
     } catch (err) {
     res.status(500).send({
@@ -20,7 +20,7 @@ const addAllCurrency = async (req, res) => {
   try {
     
       await Currencie.insertMany(req.body);
-      res.send({ message: 'All Currencies added successfully!' });
+      res.send({ message: '¡Monedas agregadas correctamente!' });
     }  catch (err) {
     res.status(500).send({
       message: err.message,
@@ -82,7 +82,7 @@ const updateCurrency = async (req, res) => {
 
       await currency.save();
       res.send({
-        message: 'Currency update successfully!',
+        message: '¡Moneda actualizada correctamente!',
       });
     }  catch (err) {
     res.status(500).send({
@@ -108,7 +108,7 @@ const updateManyCurrency = async (req, res) => {
       );
     
     res.send({
-      message: 'Currencies update successfully!',
+      message: '¡Monedas actualizadas correctamente!',
     });
   } catch (err) {
     res.status(500).send({
@@ -132,9 +132,7 @@ const updateEnabledStatus = async (req, res) => {
         }
       );
       res.status(200).send({
-        message: `Currencie ${
-          newStatus === 'show' ? 'Published' : 'Un-Published'
-        } Successfully!`,
+        message: `Moneda ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
       });
     } catch (err) {
     res.status(500).send({
@@ -157,9 +155,7 @@ const updateLiveExchangeRateStatus = async (req, res) => {
         }
       );
       res.status(200).send({
-        message: `Currencie ${
-          newStatus === 'show' ? 'Published' : 'Un-Published'
-        } Successfully!`,
+        message: `Moneda ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
       });
     }  catch (err) {
     res.status(500).send({
@@ -173,7 +169,7 @@ const deleteCurrency = async (req, res) => {
     
       await Currencie.deleteOne({ _id: req.params.id });
       res.send({
-        message: 'Delete currency successfully!',
+        message: '¡Moneda eliminada correctamente!',
       });
     } catch (err) {
     res.status(500).send({
@@ -187,7 +183,7 @@ const deleteManyCurrency = async (req, res) => {
     
       await Currencie.deleteMany({ _id: req.body.ids });
       res.send({
-        message: `currency Delete Successfully!`,
+        message: `¡Moneda eliminada correctamente!`,
       });
     }  catch (err) {
     res.status(500).send({

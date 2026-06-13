@@ -8,7 +8,7 @@ const addGlobalSetting = async (req, res) => {
     const newGlobalSetting = new Setting(req.body);
     await newGlobalSetting.save();
     res.send({
-      message: "Global Setting Added Successfully!",
+      message: "¡Configuración global agregada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -48,7 +48,7 @@ const updateGlobalSetting = async (req, res) => {
 
     res.send({
       data: globalSetting,
-      message: "Global Setting Update Successfully!",
+      message: "¡Configuración global actualizada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -63,7 +63,7 @@ const addStoreSetting = async (req, res) => {
     const newStoreSetting = new Setting(req.body);
     await newStoreSetting.save();
     res.send({
-      message: "Store Setting Added Successfully!",
+      message: "¡Configuración de la tienda agregada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -79,7 +79,7 @@ const getStoreSetting = async (req, res) => {
     // console.log("storeSetting", req.query);
 
     if (!storeSetting) {
-      return res.status(404).send({ message: "Store setting not found!" });
+      return res.status(404).send({ message: "¡Configuración de la tienda no encontrada!" });
     }
     if (req.query.filter === "all") {
       return res.send(storeSetting.setting);
@@ -138,7 +138,7 @@ const getStoreSecretKeys = async (req, res) => {
     const storeSetting = await Setting.findOne({ name: "storeSetting" });
 
     if (!storeSetting) {
-      return res.status(404).send({ message: "Store setting not found!" });
+      return res.status(404).send({ message: "¡Configuración de la tienda no encontrada!" });
     }
 
     const {
@@ -197,7 +197,7 @@ const updateStoreSetting = async (req, res) => {
 
     res.send({
       data: storeSetting,
-      message: "Store Setting Update Successfully!",
+      message: "¡Configuración de la tienda actualizada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -214,7 +214,7 @@ const addStoreCustomizationSetting = async (req, res) => {
 
     res.send({
       data: storeCustomizationSetting,
-      message: "Online Store Customization Setting Added Successfully!",
+      message: "¡Personalización de la tienda agregada correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -249,7 +249,7 @@ const getStoreCustomizationSetting = async (req, res) => {
     );
 
     if (!storeCustomizationSetting) {
-      return res.status(404).send({ message: "Settings not found" });
+      return res.status(404).send({ message: "Configuración no encontrada" });
     }
 
     res.send(storeCustomizationSetting.setting);
@@ -294,7 +294,7 @@ const updateStoreCustomizationSetting = async (req, res) => {
 
     res.send({
       data: storeCustomizationSetting,
-      message: "Online Store Customization Setting Update Successfully!",
+      message: "¡Personalización de la tienda actualizada correctamente!",
     });
   } catch (err) {
     res.status(500).send({

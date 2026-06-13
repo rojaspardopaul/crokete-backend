@@ -7,13 +7,13 @@ const addLanguage = async (req, res) => {
     const exist = await Language.findOne({ name, code, flag });
     if (exist) {
       return res.status(400).send({
-        message: "Language already exists!",
+        message: "¡El idioma ya existe!",
       });
     }
     const newLanguage = new Language(req.body);
     await newLanguage.save();
     res.send({
-      message: "Language added successfully!",
+      message: "¡Idioma agregado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -25,7 +25,7 @@ const addLanguage = async (req, res) => {
 const addAllLanguage = async (req, res) => {
   try {
     await Language.insertMany(req.body);
-    res.send({ message: "All zones added successfully!" });
+    res.send({ message: "¡Zonas agregadas correctamente!" });
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -84,7 +84,7 @@ const updateLanguage = async (req, res) => {
     }
     await language.save();
     res.send({
-      message: "Language update successfully!",
+      message: "¡Idioma actualizado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -108,7 +108,7 @@ const updateManyLanguage = async (req, res) => {
     );
 
     res.send({
-      message: "Languages update successfully!",
+      message: "¡Idiomas actualizados correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -130,9 +130,7 @@ const updateStatus = async (req, res) => {
       }
     );
     res.status(200).send({
-      message: `Language ${
-        newStatus === "show" ? "Published" : "Un-Published"
-      } Successfully!`,
+      message: `Idioma ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
     res.status(500).send({
@@ -145,7 +143,7 @@ const deleteLanguage = async (req, res) => {
   try {
     await Language.deleteOne({ _id: req.params.id });
     res.send({
-      message: "Delete language successfully!",
+      message: "¡Idioma eliminado correctamente!",
     });
   } catch (err) {
     res.status(500).send({
@@ -158,7 +156,7 @@ const deleteManyLanguage = async (req, res) => {
   try {
     await Language.deleteMany({ _id: req.body.ids });
     res.send({
-      message: `Language Delete Successfully!`,
+      message: `¡Idioma eliminado correctamente!`,
     });
   } catch (err) {
     res.status(500).send({

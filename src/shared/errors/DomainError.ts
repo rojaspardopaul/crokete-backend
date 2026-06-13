@@ -20,10 +20,21 @@ export class ValidationError extends DomainError {
   }
 }
 
+/** Spanish labels for entity names used in user-facing not-found messages. */
+const ENTITY_ES: Record<string, string> = {
+  Product: "Producto",
+  Order: "Pedido",
+  Customer: "Cliente",
+  Category: "Categoría",
+  Brand: "Marca",
+  Pet: "Mascota",
+};
+
 export class NotFoundError extends DomainError {
   readonly code = "NOT_FOUND";
   constructor(entity: string, id?: string) {
-    super(id ? `${entity} not found: ${id}` : `${entity} not found`);
+    const label = ENTITY_ES[entity] ?? entity;
+    super(id ? `${label} no encontrado (${id})` : `${label} no encontrado`);
   }
 }
 
