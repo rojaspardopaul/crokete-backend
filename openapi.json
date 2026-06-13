@@ -1,0 +1,633 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Crokete API",
+    "version": "2.0.0",
+    "description": "Contract generated from Zod schemas (single source of truth). Reference catalog module for the Crokete V2 / SaaS architecture."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5055/v1",
+      "description": "Local"
+    },
+    {
+      "url": "{baseUrl}",
+      "description": "Configurable",
+      "variables": {
+        "baseUrl": {
+          "default": "https://api.crokete.com/v1"
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "MultiLangText": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "example": {
+          "es": "Pienso para perros",
+          "en": "Dog food"
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "nullable": true
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "Prices": {
+        "type": "object",
+        "properties": {
+          "originalPrice": {
+            "type": "number"
+          },
+          "price": {
+            "type": "number"
+          },
+          "discount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "originalPrice",
+          "price"
+        ]
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "productId": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "description": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{24}$",
+              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            }
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "pet": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stock": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sales": {
+            "type": "number"
+          },
+          "tag": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prices": {
+            "$ref": "#/components/schemas/Prices"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            }
+          },
+          "isCombination": {
+            "type": "boolean"
+          },
+          "average_rating": {
+            "type": "number"
+          },
+          "total_reviews": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "show",
+              "hide"
+            ]
+          },
+          "productType": {
+            "type": "string",
+            "enum": [
+              "food",
+              "medicine",
+              "accessory",
+              "general"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_id",
+          "title",
+          "slug",
+          "prices",
+          "isCombination"
+        ]
+      },
+      "CreateProduct": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "description": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{24}$",
+              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            }
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "pet": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stock": {
+            "type": "number",
+            "minimum": 0
+          },
+          "tag": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prices": {
+            "$ref": "#/components/schemas/Prices"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            }
+          },
+          "isCombination": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title",
+          "slug",
+          "category",
+          "prices",
+          "isCombination"
+        ]
+      },
+      "UpdateProduct": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "description": {
+            "$ref": "#/components/schemas/MultiLangText"
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{24}$",
+              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            }
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "pet": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f\\d]{24}$",
+            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stock": {
+            "type": "number",
+            "minimum": 0
+          },
+          "tag": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prices": {
+            "$ref": "#/components/schemas/Prices"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            }
+          },
+          "isCombination": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ListProductsResponse": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          },
+          "totalDoc": {
+            "type": "number"
+          },
+          "limits": {
+            "type": "number"
+          },
+          "pages": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "products",
+          "totalDoc"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/products": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "List products (admin, paginated)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "required": false,
+            "name": "title",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "price",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "nullable": true
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "nullable": true
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated product list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListProductsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/product/{slug}": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Get a single product by slug",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/add": {
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Create a product",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProduct"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products/{id}": {
+      "patch": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Update a product",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{24}$",
+              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProduct"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Product"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Delete a product",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{24}$",
+              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

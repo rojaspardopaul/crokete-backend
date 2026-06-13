@@ -7,18 +7,24 @@
     "dev": "nodemon api/index.js",
     "start": "node api/index.js",
     "production": "NODE_ENV=production nodemon api/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "data:import": "node script/seed.js",
     "product": "node script/product.js",
     "generate-password": "node script/script.js",
     "generate-reviews": "node script/reviews.js",
     "init:admin": "node scripts/init-super-admin.js",
     "update:admin-access": "node scripts/update-super-admin-access.js",
-    "migrate:category-brand-separation": "node scripts/fix-category-brand-structure.js"
+    "migrate:category-brand-separation": "node scripts/fix-category-brand-structure.js",
+    "build:ts": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "openapi:gen": "tsx src/contracts/generate-openapi.ts",
+    "sdk:gen": "openapi-typescript openapi.json -o src/sdk/generated/types.ts"
   },
   "author": "HtmlLover",
   "license": "Regular",
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.0",
     "@google/genai": "^1.46.0",
     "@google/generative-ai": "^0.24.1",
     "@paypal/checkout-server-sdk": "^1.0.3",
@@ -44,6 +50,8 @@
     "nodemailer": "^6.7.2",
     "openai": "^6.33.0",
     "pdfkit": "^0.16.0",
+    "pino": "^9.5.0",
+    "zod": "^3.23.8",
     "razorpay": "^2.9.4",
     "socket.io": "^4.7.2",
     "stripe": "^9.14.0",
@@ -51,6 +59,15 @@
     "uuid": "^8.3.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/supertest": "^6.0.2",
+    "nodemon": "^3.1.0",
+    "openapi-typescript": "^7.4.0",
+    "pino-pretty": "^11.2.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.8"
   }
 }

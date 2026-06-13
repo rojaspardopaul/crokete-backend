@@ -11,7 +11,6 @@ const { connectDB } = require("../config/db");
 const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
 const { globalLimiter, searchLimiter, paymentLimiter } = require("../lib/security/apiRateLimiter");
 const { warmCache } = require("../lib/cache/warming");
-const productRoutes = require("../routes/productRoutes");
 const reviewRoutes = require("../routes/reviewRoutes");
 const customerRoutes = require("../routes/customerRoutes");
 const adminRoutes = require("../routes/adminRoutes");
@@ -43,6 +42,25 @@ const { isAuth, isAdmin } = require("../config/auth");
 // } = require("../lib/notification/setting");
 
 const mongoose = require("mongoose");
+
+// ─── Catalog module: legacy JS or new TypeScript/DDD (feature-flagged) ───────
+// USE_TS_CATALOG=true serves /v1/products from the compiled TS module
+// (dist/modules/catalog), which has full endpoint parity with the legacy
+// controller. The legacy app cache (utils/cache) is injected so invalidation
+// stays consistent across modules. Roll back instantly by unsetting the flag.
+//
+// Built HERE (after the route requires above) on purpose: those requires have
+// already registered the legacy Mongoose models, so the TS module reuses the
+// full legacy schemas instead of racing to register its own.
+let productRoutes;
+if (process.env.USE_TS_CATALOG === "true") {
+  const sharedCache = require("../utils/cache");
+  const { buildCatalogModule } = require("../dist/modules/catalog/CatalogModule");
+  productRoutes = buildCatalogModule({ cacheService: sharedCache }).router;
+  console.log("🟢 Catalog: módulo TypeScript/DDD activo (USE_TS_CATALOG=true)");
+} else {
+  productRoutes = require("../routes/productRoutes");
+}
 
 connectDB();
 const app = express();
