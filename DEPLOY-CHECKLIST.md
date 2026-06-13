@@ -3,10 +3,14 @@
 El backend compila TypeScript en la imagen y sirve módulos TS/DDD según banderas:
 - `USE_TS_CATALOG=true` → `/v1/products` desde `dist/modules/catalog`.
 - `USE_TS_ORDERS=true` → `/v1/orders` (panel admin) desde `dist/modules/orders`.
+- `USE_TS_CUSTOMERS=true` → rutas de perfil/direcciones/listado admin de
+  `/v1/customer` desde `dist/modules/customers` (montado ANTES del router legado;
+  el resto de `/v1/customer` cae al legado por fall-through).
 
 El resto sigue en código legado — en particular el flujo de **cliente y pagos**
-(`/v1/order`, webhooks Stripe/PayPal/Razorpay) NO se tocó. Rollback instantáneo
-de cualquiera de los dos: poner la bandera correspondiente en `false`.
+(`/v1/order`, webhooks Stripe/PayPal/Razorpay) y **toda la autenticación de
+clientes** (login, registro, OAuth, verificación, contraseñas, refresh) NO se
+tocaron. Rollback instantáneo de cualquiera: poner la bandera en `false`.
 
 ## Qué cambió para el deploy
 
@@ -73,3 +77,14 @@ Tras desplegar, en el panel admin confirmar: listado de pedidos con filtros,
 dashboards (conteos y montos), detalle de pedido, **cambio de estado** (que
 dispara correo en `en_reparto`/`entregado` y restaura cupón de lealtad al
 cancelar) y borrado. Si algo difiere, `USE_TS_ORDERS=false` y redeploy/env-update.
+
+## Verificación específica de customers (USE_TS_CUSTOMERS)
+
+Confirmar que **login/registro/Google/recuperar contraseña siguen funcionando**
+(esas rutas caen al legado, no deben cambiar). Luego: edición de perfil del
+cliente (devuelve token fresco), guardar/leer dirección de envío, y en el admin
+el listado de clientes y el detalle. Rollback: `USE_TS_CUSTOMERS=false`.
+
+> Pendiente conocido (no introducido aquí): `GET /v1/customer/:id` no valida
+> propiedad (IDOR preexistente). Se mantuvo por paridad; requiere decisión de a
+> quién permitir el acceso antes de endurecerlo.

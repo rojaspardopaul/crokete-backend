@@ -75,6 +75,27 @@ if (process.env.USE_TS_ORDERS === "true") {
   orderRoutes = require("../routes/orderRoutes");
 }
 
+// ─── Customers module: ported routes (profile, shipping address, admin list) ──
+// USE_TS_CUSTOMERS=true mounts a TS/DDD router BEFORE the legacy customer router
+// on /v1/customer. It only defines the ported routes; every other route — ALL
+// authentication flows (login, register, oauth, verify, password, refresh) and
+// the legacy-broken address PUT/DELETE — falls through to the legacy router,
+// untouched. Token signing and guards are injected from legacy config/auth.
+let tsCustomerRouter = null;
+if (process.env.USE_TS_CUSTOMERS === "true") {
+  const {
+    isSuperAdmin,
+    generateAccessToken,
+    generateRefreshToken,
+  } = require("../config/auth");
+  const { buildCustomersModule } = require("../dist/modules/customers/CustomersModule");
+  tsCustomerRouter = buildCustomersModule({
+    tokens: { generateAccessToken, generateRefreshToken },
+    guards: { isAuth, isSuperAdmin },
+  }).router;
+  console.log("🟢 Customers: módulo TypeScript/DDD activo para perfil/direcciones (USE_TS_CUSTOMERS=true)");
+}
+
 connectDB();
 const app = express();
 
@@ -132,6 +153,8 @@ app.use("/v1/products/", searchLimiter, productRoutes);
 app.use("/v1/reviews/", isAuth, reviewRoutes);
 app.use("/v1/category/", categoryRoutes);
 app.use("/v1/coupon/", couponRoutes);
+// TS customer router (if enabled) handles ported routes; rest falls through to legacy
+if (tsCustomerRouter) app.use("/v1/customer/", tsCustomerRouter);
 app.use("/v1/customer/", customerRoutes);
 app.use("/v1/order/", isAuth, paymentLimiter, customerOrderRoutes);
 app.use("/v1/attributes/", attributeRoutes);
