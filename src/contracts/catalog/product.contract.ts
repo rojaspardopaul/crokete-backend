@@ -19,13 +19,17 @@ const FlexibleVariantArray = z.preprocess(
   z.array(z.record(z.string(), z.unknown()))
 );
 
-/** Hierarchical pricing block (mirrors Product.prices). */
+/**
+ * Hierarchical pricing block (mirrors Product.prices). Uses z.coerce.number()
+ * because the legacy admin form sends prices as strings ("450.00"); the legacy
+ * controller never validated and relied on Mongoose to cast string -> number.
+ */
 export const PricesSchema = registry.register(
   "Prices",
   z.object({
-    originalPrice: z.number(),
-    price: z.number(),
-    discount: z.number().optional(),
+    originalPrice: z.coerce.number(),
+    price: z.coerce.number(),
+    discount: z.coerce.number().optional(),
   })
 );
 
@@ -88,7 +92,7 @@ export const CreateProductDTOSchema = registry.register(
       pet: ObjectIdSchema.nullable().optional(),
       brand: ObjectIdSchema.nullable().optional(),
       image: FlexibleStringArray.optional(),
-      stock: z.number().min(0).optional(),
+      stock: z.coerce.number().min(0).optional(),
       tag: FlexibleStringArray.optional(),
       prices: PricesSchema,
       variants: FlexibleVariantArray.optional(),

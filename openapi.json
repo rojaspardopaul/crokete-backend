@@ -53,13 +53,16 @@
         "type": "object",
         "properties": {
           "originalPrice": {
-            "type": "number"
+            "type": "number",
+            "nullable": true
           },
           "price": {
-            "type": "number"
+            "type": "number",
+            "nullable": true
           },
           "discount": {
-            "type": "number"
+            "type": "number",
+            "nullable": true
           }
         },
         "required": [
@@ -246,6 +249,7 @@
           },
           "stock": {
             "type": "number",
+            "nullable": true,
             "minimum": 0
           },
           "tag": {
@@ -337,6 +341,7 @@
           },
           "stock": {
             "type": "number",
+            "nullable": true,
             "minimum": 0
           },
           "tag": {

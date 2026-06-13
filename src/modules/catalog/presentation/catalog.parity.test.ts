@@ -111,6 +111,20 @@ describe("catalog router (HTTP parity)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("accepts prices and stock sent as strings (legacy admin form)", async () => {
+    const res = await request(app)
+      .post("/products/add")
+      .send({
+        ...validBody,
+        slug: "string-prices",
+        stock: "11",
+        prices: { originalPrice: "450.00", price: "299.00", discount: "151.00" },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.prices.originalPrice).toBe(450);
+    expect(res.body.stock).toBe(11);
+  });
+
   it("PUT /products/status/:id toggles status", async () => {
     const created = await request(app).post("/products/add").send(validBody);
     const res = await request(app)

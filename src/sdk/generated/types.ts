@@ -239,9 +239,9 @@ export interface components {
             details?: unknown;
         };
         Prices: {
-            originalPrice: number;
-            price: number;
-            discount?: number;
+            originalPrice: number | null;
+            price: number | null;
+            discount?: number | null;
         };
         Product: {
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
@@ -292,7 +292,7 @@ export interface components {
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             brand?: string | null;
             image?: string[] | null;
-            stock?: number;
+            stock?: number | null;
             tag?: string[] | null;
             prices: components["schemas"]["Prices"];
             variants?: {
@@ -315,7 +315,7 @@ export interface components {
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             brand?: string | null;
             image?: string[] | null;
-            stock?: number;
+            stock?: number | null;
             tag?: string[] | null;
             prices?: components["schemas"]["Prices"];
             variants?: {
