@@ -92,6 +92,25 @@ describe("catalog router (HTTP parity)", () => {
     expect(res.body.data.title).toEqual({ es: "Pienso", en: "Premium" });
   });
 
+  it("PATCH /products/:id coerces array fields sent as strings (legacy parity)", async () => {
+    const created = await request(app).post("/products/add").send(validBody);
+    const id = created.body._id;
+    // The legacy admin form may send tag/image as "" or a bare string.
+    const res = await request(app)
+      .patch(`/products/${id}`)
+      .send({ tag: "", image: "https://img/x.png", packageInfo: { weight: 200, unit: "g" } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.tag).toEqual([]);
+    expect(res.body.data.image).toEqual(["https://img/x.png"]);
+  });
+
+  it("POST /products/add coerces empty-string arrays", async () => {
+    const res = await request(app)
+      .post("/products/add")
+      .send({ ...validBody, slug: "coerce", tag: "", image: "" });
+    expect(res.status).toBe(200);
+  });
+
   it("PUT /products/status/:id toggles status", async () => {
     const created = await request(app).post("/products/add").send(validBody);
     const res = await request(app)

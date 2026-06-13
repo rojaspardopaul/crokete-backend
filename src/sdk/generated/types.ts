@@ -284,20 +284,20 @@ export interface components {
             title: components["schemas"]["MultiLangText"];
             description?: components["schemas"]["MultiLangText"];
             slug: string;
-            categories?: string[];
+            categories?: string[] | null;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             category: string;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             pet?: string | null;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             brand?: string | null;
-            image?: string[];
+            image?: string[] | null;
             stock?: number;
-            tag?: string[];
+            tag?: string[] | null;
             prices: components["schemas"]["Prices"];
             variants?: {
                 [key: string]: unknown;
-            }[];
+            }[] | null;
             isCombination: boolean;
         };
         UpdateProduct: {
@@ -307,20 +307,20 @@ export interface components {
             title?: components["schemas"]["MultiLangText"];
             description?: components["schemas"]["MultiLangText"];
             slug?: string;
-            categories?: string[];
+            categories?: string[] | null;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             category?: string;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             pet?: string | null;
             /** @example 665f1b2c3d4e5f6a7b8c9d0e */
             brand?: string | null;
-            image?: string[];
+            image?: string[] | null;
             stock?: number;
-            tag?: string[];
+            tag?: string[] | null;
             prices?: components["schemas"]["Prices"];
             variants?: {
                 [key: string]: unknown;
-            }[];
+            }[] | null;
             isCombination?: boolean;
         };
         ListProductsResponse: {

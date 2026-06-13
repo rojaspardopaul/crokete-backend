@@ -1,6 +1,24 @@
 import { z, registry } from "../openapi";
 import { MultiLangTextSchema, ObjectIdSchema } from "../shared";
 
+/**
+ * The legacy admin form sometimes sends array fields as a bare string (or "")
+ * instead of an array. The legacy controller never validated, so to keep parity
+ * these inputs coerce: "" / null / undefined -> [], a single string -> [string],
+ * arrays pass through. Applied to tag / image / categories / variants.
+ */
+const toArray = (val: unknown): unknown => {
+  if (val === "" || val === null || val === undefined) return [];
+  if (Array.isArray(val)) return val;
+  return [val];
+};
+const FlexibleStringArray = z.preprocess(toArray, z.array(z.string()));
+const FlexibleObjectIdArray = z.preprocess(toArray, z.array(ObjectIdSchema));
+const FlexibleVariantArray = z.preprocess(
+  (v) => (v === "" || v === null || v === undefined ? [] : v),
+  z.array(z.record(z.string(), z.unknown()))
+);
+
 /** Hierarchical pricing block (mirrors Product.prices). */
 export const PricesSchema = registry.register(
   "Prices",
@@ -65,15 +83,15 @@ export const CreateProductDTOSchema = registry.register(
       title: MultiLangTextSchema,
       description: MultiLangTextSchema.optional(),
       slug: z.string().min(1),
-      categories: z.array(ObjectIdSchema).optional(),
+      categories: FlexibleObjectIdArray.optional(),
       category: ObjectIdSchema,
       pet: ObjectIdSchema.nullable().optional(),
       brand: ObjectIdSchema.nullable().optional(),
-      image: z.array(z.string()).optional(),
+      image: FlexibleStringArray.optional(),
       stock: z.number().min(0).optional(),
-      tag: z.array(z.string()).optional(),
+      tag: FlexibleStringArray.optional(),
       prices: PricesSchema,
-      variants: z.array(z.record(z.string(), z.unknown())).optional(),
+      variants: FlexibleVariantArray.optional(),
       isCombination: z.boolean(),
     })
     .passthrough()

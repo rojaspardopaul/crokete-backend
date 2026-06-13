@@ -213,6 +213,7 @@
           },
           "categories": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string",
               "pattern": "^[a-f\\d]{24}$",
@@ -238,6 +239,7 @@
           },
           "image": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string"
             }
@@ -248,6 +250,7 @@
           },
           "tag": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string"
             }
@@ -257,6 +260,7 @@
           },
           "variants": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "object",
               "additionalProperties": {
@@ -300,6 +304,7 @@
           },
           "categories": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string",
               "pattern": "^[a-f\\d]{24}$",
@@ -325,6 +330,7 @@
           },
           "image": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string"
             }
@@ -335,6 +341,7 @@
           },
           "tag": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "string"
             }
@@ -344,6 +351,7 @@
           },
           "variants": {
             "type": "array",
+            "nullable": true,
             "items": {
               "type": "object",
               "additionalProperties": {
