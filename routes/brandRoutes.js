@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { adminOnlyMutations } = require("../config/routeGuards");
 const {
   addBrand,
   addAllBrands,
@@ -12,6 +13,9 @@ const {
   deleteManyBrands,
   updateManyBrands,
 } = require("../controller/brandController");
+
+// Require admin for all mutating routes (reads stay public).
+router.use(adminOnlyMutations());
 
 // add a brand
 router.post("/add", addBrand);

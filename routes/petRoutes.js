@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { adminOnlyMutations } = require("../config/routeGuards");
 const {
   addPet,
   addAllPets,
@@ -12,6 +13,9 @@ const {
   deleteManyPets,
   updateManyPets,
 } = require("../controller/petController");
+
+// Require admin for all mutating routes (reads stay public).
+router.use(adminOnlyMutations());
 
 // add a pet
 router.post("/add", addPet);

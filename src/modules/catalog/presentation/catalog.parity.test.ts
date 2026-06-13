@@ -156,3 +156,35 @@ describe("catalog router (HTTP parity)", () => {
     expect(repo.count()).toBe(1);
   });
 });
+
+describe("catalog router (adminGuard)", () => {
+  function appWithGuard() {
+    const { router } = buildCatalogModule({
+      products: new InMemoryProductRepository(),
+      cache: fakeCache(),
+      read: fakeRead(),
+      events: new EventBus(),
+      adminGuard: [(_req, res) => res.status(401).send({ message: "unauthorized" })],
+    });
+    const a = express();
+    a.use(express.json());
+    a.use("/products", router);
+    return a;
+  }
+
+  it("blocks mutations without admin", async () => {
+    const a = appWithGuard();
+    expect((await request(a).post("/products/add").send(validBody)).status).toBe(401);
+    expect((await request(a).patch("/products/abc").send({})).status).toBe(401);
+    expect((await request(a).delete("/products/abc")).status).toBe(401);
+    expect((await request(a).put("/products/status/abc").send({ status: "hide" })).status).toBe(401);
+  });
+
+  it("leaves public reads open", async () => {
+    const a = appWithGuard();
+    expect((await request(a).get("/products/show")).status).toBe(200);
+    expect((await request(a).get("/products/store")).status).toBe(200);
+    expect((await request(a).get("/products/product/royal-canin")).status).toBe(200);
+    expect((await request(a).post("/products/someid")).status).toBe(200); // getById read
+  });
+});

@@ -3,9 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const mongoSanitize = require("express-mongo-sanitize");
-// const path = require("path");
-// const http = require("http");
-// const { Server } = require("socket.io");
 
 const { connectDB } = require("../config/db");
 const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
@@ -36,10 +33,6 @@ const { getActiveVeterinarians } = require("../controller/veterinarianController
 const aiRoutes = require("../routes/aiRoutes");
 const contactRoutes = require("../routes/contactRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
-// const {
-//   getGlobalSetting,
-//   getStoreCustomizationSetting,
-// } = require("../lib/notification/setting");
 
 const mongoose = require("mongoose");
 
@@ -56,7 +49,10 @@ let productRoutes;
 if (process.env.USE_TS_CATALOG === "true") {
   const sharedCache = require("../utils/cache");
   const { buildCatalogModule } = require("../dist/modules/catalog/CatalogModule");
-  productRoutes = buildCatalogModule({ cacheService: sharedCache }).router;
+  productRoutes = buildCatalogModule({
+    cacheService: sharedCache,
+    adminGuard: [isAuth, isAdmin], // protect product mutations
+  }).router;
   console.log("🟢 Catalog: módulo TypeScript/DDD activo (USE_TS_CATALOG=true)");
 } else {
   productRoutes = require("../routes/productRoutes");
@@ -208,58 +204,3 @@ const gracefulShutdown = async (signal) => {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
-// set up socket
-// const io = new Server(server, {
-//   cors: {
-//     origin: [
-//       "http://localhost:3000",
-//       "http://localhost:4100",
-//       "https://admin-kachabazar.vercel.app",
-//       "https://dashtar-admin.vercel.app",
-//       "https://kachabazar-store.vercel.app",
-//       "https://kachabazar-admin.netlify.app",
-//       "https://dashtar-admin.netlify.app",
-//       "https://kachabazar-store-nine.vercel.app",
-//     ], //add your origin here instead of this
-//     methods: ["PUT", "GET", "POST", "DELETE", "PATCH", "OPTIONS"],
-//     credentials: false,
-//     transports: ["websocket"],
-//   },
-// });
-
-// io.on("connection", (socket) => {
-//   // console.log(`Socket ${socket.id} connected!`);
-
-//   socket.on("notification", async (data) => {
-//     console.log("data", data);
-//     try {
-//       let updatedData = data;
-
-//       if (data?.option === "storeCustomizationSetting") {
-//         const storeCustomizationSetting = await getStoreCustomizationSetting(
-//           data
-//         );
-//         updatedData = {
-//           ...data,
-//           storeCustomizationSetting: storeCustomizationSetting,
-//         };
-//       }
-//       if (data?.option === "globalSetting") {
-//         const globalSetting = await getGlobalSetting(data);
-//         updatedData = {
-//           ...data,
-//           globalSetting: globalSetting,
-//         };
-//       }
-//       io.emit("notification", updatedData);
-//     } catch (error) {
-//       console.error("Error handling notification:", error);
-//     }
-//   });
-
-//   socket.on("disconnect", () => {
-//     console.log(`Socket ${socket.id} disconnected!`);
-//   });
-// });
-// server.listen(PORT, () => console.log(`server running on port ${PORT}`));

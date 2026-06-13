@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { adminOnlyMutations } = require('../config/routeGuards');
 const {
   addCategory,
   addAllCategory,
@@ -14,6 +15,9 @@ const {
   updateManyCategory
 
 } = require('../controller/categoryController');
+
+// Require admin for all mutating routes (reads stay public).
+router.use(adminOnlyMutations());
 
 //add a category
 router.post('/add', addCategory);

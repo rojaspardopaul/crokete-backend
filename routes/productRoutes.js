@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { adminOnlyMutations } = require("../config/routeGuards");
 const {
   addProduct,
   addAllProducts,
@@ -14,6 +15,14 @@ const {
   deleteManyProducts,
   getShowingStoreProducts,
 } = require("../controller/productController");
+
+// Require admin for mutations; POST /:id (getProductById) stays a public read.
+router.use(
+  adminOnlyMutations({
+    isPublicRead: (method, path) =>
+      method === "POST" && path !== "/add" && path !== "/all",
+  })
+);
 
 //add a product
 router.post("/add", addProduct);

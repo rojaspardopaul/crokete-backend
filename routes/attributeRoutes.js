@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { adminOnlyMutations } = require('../config/routeGuards');
 
 const {
   addAttribute,
@@ -21,6 +22,14 @@ const {
   updateManyChildAttribute,
   deleteManyChildAttribute,
 } = require('../controller/attributeController');
+
+// Require admin for mutations; PUT /show/test (getShowingAttributesTest) is a
+// read and stays public.
+router.use(
+  adminOnlyMutations({
+    isPublicRead: (method, path) => method === 'PUT' && path === '/show/test',
+  })
+);
 
 //add attribute
 router.post('/add', addAttribute);

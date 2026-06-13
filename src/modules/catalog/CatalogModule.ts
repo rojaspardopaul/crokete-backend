@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { eventBus as defaultEventBus, type EventBus } from "../../shared/events/EventBus";
 import type { IProductRepository } from "./domain/repositories/IProductRepository";
 import type { CatalogCachePort, CatalogReadPort } from "./application/ports";
@@ -29,6 +29,8 @@ export interface CatalogModuleDeps {
   cache?: CatalogCachePort;
   read?: CatalogReadPort;
   events?: EventBus;
+  /** Middleware applied to mutating routes only (e.g. [isAuth, isAdmin]). */
+  adminGuard?: RequestHandler[];
 }
 
 /**
@@ -79,7 +81,7 @@ export function buildCatalogModule(deps: CatalogModuleDeps = {}): {
   );
 
   return {
-    router: createProductRouter(controller),
+    router: createProductRouter(controller, deps.adminGuard ?? []),
     useCases: {
       createProduct,
       updateProduct,

@@ -404,6 +404,55 @@ const addRazorpayOrder = async (req, res) => {
       return res.status(400).send({ message: "Verificación de pago fallida." });
     }
 
+    // Verificar contra la API de Razorpay que el pago existe, pertenece a esta
+    // orden y está CAPTURADO por el monto completo. La firma sola no garantiza
+    // que los fondos se capturaron ni el monto. (Comparamos contra la orden de
+    // Razorpay para evitar el desajuste de moneda MXN/INR; la conversión
+    // moneda↔total del pedido queda como decisión de producto — ver nota.)
+    try {
+      const instance = new Razorpay({
+        key_id: storeSetting?.setting?.razorpay_id,
+        key_secret: razorpaySecret,
+      });
+      const [payment, rzpOrder] = await Promise.all([
+        instance.payments.fetch(razorpay_payment_id),
+        instance.orders.fetch(razorpay_order_id),
+      ]);
+
+      const captured = payment?.status === "captured";
+      const belongsToOrder = payment?.order_id === razorpay_order_id;
+      const amountMatches =
+        Number(payment?.amount) === Number(rzpOrder?.amount);
+
+      if (!captured || !belongsToOrder || !amountMatches) {
+        logPaymentEvent({
+          userId: req.user._id,
+          userEmail: req.body.user_info?.email,
+          event: "RAZORPAY_PAYMENT_INVALID",
+          amount: req.body.total,
+          status: "error",
+          errorMessage: `status=${payment?.status} order=${payment?.order_id} amount=${payment?.amount}/${rzpOrder?.amount}`,
+          req,
+        });
+        return res
+          .status(400)
+          .send({ message: "El pago no pudo verificarse o está incompleto." });
+      }
+    } catch (verifyErr) {
+      logPaymentEvent({
+        userId: req.user._id,
+        userEmail: req.body.user_info?.email,
+        event: "RAZORPAY_VERIFY_ERROR",
+        amount: req.body.total,
+        status: "error",
+        errorMessage: verifyErr.message,
+        req,
+      });
+      return res
+        .status(400)
+        .send({ message: "No se pudo verificar el pago con Razorpay." });
+    }
+
     // Validar costo de envío
     const shippingError = await validateShippingCost(
       req.body.shippingCost,

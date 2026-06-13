@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { adminOnlyMutations } = require('../config/routeGuards');
 const {
   addCoupon,
   addAllCoupon,
@@ -12,6 +13,9 @@ const {
   updateManyCoupons,
   deleteManyCoupons,
 } = require('../controller/couponController');
+
+// Require admin for all mutating routes (reads stay public).
+router.use(adminOnlyMutations());
 
 //add a coupon
 router.post('/add', addCoupon);
