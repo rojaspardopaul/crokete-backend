@@ -30,6 +30,7 @@ const { getPublicConfig } = require("../controller/loyaltyController");
 const { getPublicVetConfig } = require("../controller/vetConfigController");
 const { getActiveVeterinarians } = require("../controller/veterinarianController");
 const aiRoutes = require("../routes/aiRoutes");
+const uploadRoutes = require("../routes/uploadRoutes");
 const contactRoutes = require("../routes/contactRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
 
@@ -111,6 +112,8 @@ app.use("/v1/webhook", stripeWebhookRoutes);
 // AI routes accept base64 images for vision/OCR → larger body limit (parsed here
 // first; the global 4mb parser below then skips since the body is already read).
 app.use("/v1/ai", express.json({ limit: "15mb" }));
+// Image uploads also receive base64 images → larger body limit.
+app.use("/v1/upload", express.json({ limit: "15mb" }));
 
 app.use(express.json({ limit: "4mb" }));
 app.use(mongoSanitize());
@@ -184,6 +187,9 @@ app.use("/v1/payment-logs/", isAuth, isAdmin, paymentLogRoutes);
 
 // AI product generation routes (admin only)
 app.use("/v1/ai/", isAuth, aiRoutes);
+
+// Centralized image uploads (admin only) — normalizes to webp + uniform size
+app.use("/v1/upload/", isAuth, uploadRoutes);
 
 // Contact form (public)
 app.use("/v1/contact", contactRoutes);
