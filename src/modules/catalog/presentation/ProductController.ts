@@ -31,10 +31,19 @@ export class ProductController {
     private readonly read: CatalogReadPort
   ) {}
 
+  /** Formats the first Zod issue as "field.path: message" and logs all issues. */
+  private validationMessage(error: { issues: { path: (string | number)[]; message: string }[] }): string {
+    console.error("[catalog] validation issues:", JSON.stringify(error.issues));
+    const first = error.issues[0];
+    if (!first) return "Invalid product";
+    const path = first.path.join(".");
+    return path ? `${path}: ${first.message}` : first.message;
+  }
+
   add = async (req: Request, res: Response): Promise<void> => {
     const parsed = CreateProductDTOSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).send({ message: parsed.error.issues[0]?.message ?? "Invalid product" });
+      res.status(400).send({ message: this.validationMessage(parsed.error) });
       return;
     }
     const result = await this.createProduct.execute(parsed.data);
@@ -136,7 +145,7 @@ export class ProductController {
   update = async (req: Request, res: Response): Promise<void> => {
     const parsed = UpdateProductDTOSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).send({ message: parsed.error.issues[0]?.message ?? "Invalid product" });
+      res.status(400).send({ message: this.validationMessage(parsed.error) });
       return;
     }
     const result = await this.updateProductUC.execute(
