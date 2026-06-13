@@ -155,7 +155,8 @@ const productSchema = new mongoose.Schema(
       weight: { type: Number },
       unit: {
         type: String,
-        enum: ["kg", "g", "lb"],
+        // peso: kg/g/mg/lb/oz · volumen: l/ml · conteo: pieza
+        enum: ["kg", "g", "mg", "l", "ml", "lb", "oz", "pieza"],
       },
       servings: { type: Number },
     },

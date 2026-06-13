@@ -57,7 +57,7 @@ const productSchema = new Schema(
     },
     packageInfo: {
       weight: { type: Number },
-      unit: { type: String, enum: ["kg", "g", "lb"] },
+      unit: { type: String, enum: ["kg", "g", "mg", "l", "ml", "lb", "oz", "pieza"] },
       servings: { type: Number },
     },
     benefits: multiLang,
