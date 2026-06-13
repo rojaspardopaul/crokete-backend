@@ -1,8 +1,12 @@
 # Deploy checklist — nuevo proyecto GCP (Crokete backend V2)
 
-El backend ahora compila TypeScript en la imagen y, con `USE_TS_CATALOG=true`,
-sirve `/v1/products` desde el módulo TS/DDD (`dist/modules/catalog`). El resto de
-la API sigue en el código legado. Rollback instantáneo: poner `USE_TS_CATALOG=false`.
+El backend compila TypeScript en la imagen y sirve módulos TS/DDD según banderas:
+- `USE_TS_CATALOG=true` → `/v1/products` desde `dist/modules/catalog`.
+- `USE_TS_ORDERS=true` → `/v1/orders` (panel admin) desde `dist/modules/orders`.
+
+El resto sigue en código legado — en particular el flujo de **cliente y pagos**
+(`/v1/order`, webhooks Stripe/PayPal/Razorpay) NO se tocó. Rollback instantáneo
+de cualquiera de los dos: poner la bandera correspondiente en `false`.
 
 ## Qué cambió para el deploy
 
@@ -56,8 +60,16 @@ Vuelve al controller legado al instante.
 
 ## Importante: lo que NO cambió (sigue en legado)
 
-- Orders / pagos / webhooks (Stripe, PayPal, Razorpay), customers, loyalty,
-  reviews, categorías, marcas, vet, settings, etc.
-- El módulo `src/modules/orders` (flujo `OrderPaid`) es **solo referencia** y NO
-  está cableado en producción (cablearlo duplicaría el descuento de stock y los
-  puntos que ya hace el flujo legado). No activarlo aún.
+- **Cliente y pagos**: creación de pedidos, payment intents, webhooks
+  (Stripe/PayPal/Razorpay) — todo `/v1/order` permanece en el controller legado.
+- customers, loyalty, reviews, vet, settings, etc.
+- El flujo `OrderPaid`/`confirmPayment` del módulo TS (`MarkOrderPaid` +
+  handlers de inventory/loyalty/notifications) es **solo referencia** y NO está
+  cableado en producción (lo haría el flujo de pagos legado por duplicado).
+
+## Verificación específica de orders (USE_TS_ORDERS)
+
+Tras desplegar, en el panel admin confirmar: listado de pedidos con filtros,
+dashboards (conteos y montos), detalle de pedido, **cambio de estado** (que
+dispara correo en `en_reparto`/`entregado` y restaura cupón de lealtad al
+cancelar) y borrado. Si algo difiere, `USE_TS_ORDERS=false` y redeploy/env-update.

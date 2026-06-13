@@ -8,12 +8,14 @@ import type { InventoryPort } from "../inventory/application/InventoryPort";
 import type { LoyaltyPort } from "../loyalty/application/LoyaltyPort";
 import type { NotificationPort } from "../notifications/application/NotificationPort";
 
-function makeOrder(id: string) {
-  return Order.rehydrate(id, {
-    customerId: "cust1",
-    items: [{ _id: "p1", quantity: 2 }],
+function makeOrder(id: string, paid = false) {
+  return Order.fromDocument({
+    _id: id,
+    user: "cust1",
+    cart: [{ _id: "p1", quantity: 2 }],
     total: 150,
-    status: "Pending",
+    paid,
+    status: "pedido",
   });
 }
 
@@ -59,12 +61,7 @@ describe("OrderPaid flow", () => {
     const bus = new EventBus();
     const inventory: InventoryPort = { decrementForOrder: vi.fn(async () => {}) };
 
-    const order = Order.rehydrate("o2", {
-      customerId: "cust1",
-      items: [{ _id: "p1", quantity: 1 }],
-      total: 10,
-      status: "Paid",
-    });
+    const order = makeOrder("o2", true); // already paid
 
     const { markOrderPaid, unsubscribe } = buildOrdersModule({
       orders: repoWith(order),

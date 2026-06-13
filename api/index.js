@@ -11,7 +11,6 @@ const { warmCache } = require("../lib/cache/warming");
 const reviewRoutes = require("../routes/reviewRoutes");
 const customerRoutes = require("../routes/customerRoutes");
 const adminRoutes = require("../routes/adminRoutes");
-const orderRoutes = require("../routes/orderRoutes");
 const customerOrderRoutes = require("../routes/customerOrderRoutes");
 const categoryRoutes = require("../routes/categoryRoutes");
 const couponRoutes = require("../routes/couponRoutes");
@@ -56,6 +55,24 @@ if (process.env.USE_TS_CATALOG === "true") {
   console.log("🟢 Catalog: módulo TypeScript/DDD activo (USE_TS_CATALOG=true)");
 } else {
   productRoutes = require("../routes/productRoutes");
+}
+
+// ─── Admin orders module: legacy JS or new TypeScript/DDD (feature-flagged) ──
+// USE_TS_ORDERS=true serves /v1/orders (admin) from the compiled TS module.
+// The customer/payment flow (/v1/order) ALWAYS stays on the legacy controller.
+// Status side effects (loyalty + email) are injected from the shared JS module
+// so behaviour is identical to the legacy admin updateOrder.
+let orderRoutes;
+if (process.env.USE_TS_ORDERS === "true") {
+  const { orderStatusEffectsPort } = require("../lib/orders/statusChangeEffects");
+  const { buildAdminOrdersModule } = require("../dist/modules/orders/AdminOrdersModule");
+  orderRoutes = buildAdminOrdersModule({
+    effects: orderStatusEffectsPort,
+    guard: [isAdmin], // isAuth is applied at the mount below
+  }).router;
+  console.log("🟢 Orders (admin): módulo TypeScript/DDD activo (USE_TS_ORDERS=true)");
+} else {
+  orderRoutes = require("../routes/orderRoutes");
 }
 
 connectDB();
