@@ -12,10 +12,15 @@ npm run init:admin   # Bootstrap super admin user (one-time)
 npm run generate-reviews  # Generate fake reviews for testing
 ```
 
-Deploy to Google Cloud Run:
+Deploy to Google Cloud Run (project `project-9266ab3a-2007-4933-be4`, service
+`backend-service` in `us-south1`):
 ```bash
-gcloud builds submit --config=cloudbuild.yaml --project=crokete
+gcloud builds submit --config=cloudbuild.yaml --project=project-9266ab3a-2007-4933-be4
 ```
+The image tag defaults to `latest` via the `_TAG` substitution, so no extra args
+are needed for a manual build. The Dockerfile compiles TypeScript (`src/` →
+`dist/`); production serves the TS/DDD modules via `USE_TS_CATALOG`,
+`USE_TS_ORDERS` and `USE_TS_CUSTOMERS` (set to `true` in `cloudbuild.yaml`).
 
 ## Architecture Overview
 
