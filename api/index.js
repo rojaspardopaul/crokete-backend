@@ -108,6 +108,10 @@ app.set("trust proxy", 1);
 // but since we use express.raw() on the route itself, register it before general routes
 app.use("/v1/webhook", stripeWebhookRoutes);
 
+// AI routes accept base64 images for vision/OCR → larger body limit (parsed here
+// first; the global 4mb parser below then skips since the body is already read).
+app.use("/v1/ai", express.json({ limit: "15mb" }));
+
 app.use(express.json({ limit: "4mb" }));
 app.use(mongoSanitize());
 app.use(helmet());

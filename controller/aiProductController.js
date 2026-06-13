@@ -36,10 +36,14 @@ const generateProductData = async (req, res) => {
       additionalInfo,
     } = req.body;
 
+    // Images sent as data URLs (or {mimeType,data}). Used for vision/OCR only —
+    // they are NEVER uploaded to Cloudinary; we just extract text/info from them.
+    const images = normalizeImages(req.body.images);
+
     // ─── Validation ────────────────────────────────────────────
-    if (!productName || !productName.trim()) {
+    if ((!productName || !productName.trim()) && images.length === 0) {
       return res.status(400).json({
-        message: "El nombre del producto es requerido.",
+        message: "Ingresa el nombre del producto o adjunta al menos una imagen.",
       });
     }
 
@@ -102,17 +106,21 @@ const generateProductData = async (req, res) => {
     }
 
     // ─── Build prompt & generate ───────────────────────────────
+    const imagesNote = images.length
+      ? "\n\nIMPORTANTE: Se adjuntaron imágenes del producto/empaque. Extrae de ellas toda la información posible (nombre, marca, ingredientes, análisis garantizado/tabla nutricional, indicaciones, dosis, advertencias, peso/presentación, etc.) y úsala para completar los campos."
+      : "";
+
     const prompt = buildProductPrompt({
-      productName: productName.trim(),
+      productName: productName?.trim() || "(identificar a partir de las imágenes adjuntas)",
       productType,
       brandName,
       categoryName,
       petType,
-      additionalInfo: additionalInfo?.trim() || "",
+      additionalInfo: (additionalInfo?.trim() || "") + imagesNote,
       contextData,
     });
 
-    const aiData = await generateProductJSON(effectiveProvider, prompt);
+    const aiData = await generateProductJSON(effectiveProvider, prompt, images);
 
     // ─── Post-process: inject real IDs ─────────────────────────
     const productData = postProcessAIResponse(aiData, contextData);
@@ -158,6 +166,32 @@ const getProviders = async (req, res) => {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const MAX_IMAGES = 6;
+const ALLOWED_IMAGE_MIME = /^image\/(jpeg|jpg|png|webp|gif|heic|heif)$/i;
+
+/**
+ * Normalize incoming images to [{ mimeType, data(base64) }]. Accepts either
+ * data-URL strings ("data:image/jpeg;base64,...") or { mimeType, data } objects.
+ * Used for AI vision only — images are never persisted/uploaded.
+ */
+function normalizeImages(images) {
+  if (!Array.isArray(images)) return [];
+  const out = [];
+  for (const img of images.slice(0, MAX_IMAGES)) {
+    if (typeof img === "string") {
+      const m = img.match(/^data:([^;]+);base64,(.+)$/);
+      if (m && ALLOWED_IMAGE_MIME.test(m[1])) {
+        out.push({ mimeType: m[1], data: m[2] });
+      }
+    } else if (img && typeof img.data === "string" && typeof img.mimeType === "string") {
+      if (ALLOWED_IMAGE_MIME.test(img.mimeType)) {
+        out.push({ mimeType: img.mimeType, data: img.data.replace(/^data:[^;]+;base64,/, "") });
+      }
+    }
+  }
+  return out;
+}
 
 /**
  * Post-process AI response to inject real MongoDB IDs
