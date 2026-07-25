@@ -1,4 +1,36 @@
-const AuditLog = require("../models/AuditLog");
+const { getPrisma } = require("../lib/prisma");
+const { toApi } = require("../lib/prisma/presenters");
+const { isUuid, fail } = require("../lib/prisma/helpers");
+
+const auditLogs = () => getPrisma().auditLog;
+
+/** Relaciones que antes se traían con populate("adminId"/"targetId"). */
+const WITH_ACTORS = {
+  admin: { select: { id: true, name: true, email: true } },
+  target: { select: { id: true, name: true, email: true } },
+};
+
+/**
+ * La API heredada devolvía `adminId`/`targetId` ya poblados con el documento
+ * del administrador; se reconstruye esa forma desde las relaciones.
+ */
+function logToApi(row) {
+  const { admin, target, ...rest } = row;
+  return {
+    ...toApi(rest),
+    adminId: admin ? toApi(admin) : rest.adminId,
+    targetId: target ? toApi(target) : rest.targetId,
+  };
+}
+
+function paginationFrom(page, limit, total) {
+  return {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    total,
+    pages: Math.ceil(total / parseInt(limit)),
+  };
+}
 
 /**
  * Get all audit logs with pagination and filters
@@ -15,43 +47,34 @@ const getAllAuditLogs = async (req, res) => {
       endDate,
     } = req.query;
 
-    const query = {};
+    const where = {};
+    if (action) where.action = action;
+    if (adminId && isUuid(adminId)) where.adminId = adminId;
+    if (targetId && isUuid(targetId)) where.targetId = targetId;
 
-    // Apply filters
-    if (action) query.action = action;
-    if (adminId) query.adminId = adminId;
-    if (targetId) query.targetId = targetId;
-    
     if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+    const skip = (parseInt(page) - 1) * take;
 
-    const logs = await AuditLog.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate("adminId", "name email")
-      .populate("targetId", "name email");
+    const [rows, total] = await Promise.all([
+      auditLogs().findMany({
+        where,
+        include: WITH_ACTORS,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      auditLogs().count({ where }),
+    ]);
 
-    const total = await AuditLog.countDocuments(query);
-
-    res.send({
-      logs,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)),
-      },
-    });
+    res.send({ logs: rows.map(logToApi), pagination: paginationFrom(page, limit, total) });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
@@ -63,29 +86,27 @@ const getAuditLogsByAdmin = async (req, res) => {
     const { page = 1, limit = 50 } = req.query;
     const { adminId } = req.params;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    if (!isUuid(adminId)) {
+      return res.send({ logs: [], pagination: paginationFrom(page, limit, 0) });
+    }
 
-    const logs = await AuditLog.find({ adminId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate("targetId", "name email");
+    const take = parseInt(limit);
+    const skip = (parseInt(page) - 1) * take;
 
-    const total = await AuditLog.countDocuments({ adminId });
+    const [rows, total] = await Promise.all([
+      auditLogs().findMany({
+        where: { adminId },
+        include: WITH_ACTORS,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      auditLogs().count({ where: { adminId } }),
+    ]);
 
-    res.send({
-      logs,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)),
-      },
-    });
+    res.send({ logs: rows.map(logToApi), pagination: paginationFrom(page, limit, total) });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
@@ -98,64 +119,44 @@ const getAuditStats = async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
-    // Get counts by action
-    const actionStats = await AuditLog.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: startDate },
-        },
-      },
-      {
-        $group: {
-          _id: "$action",
-          count: { $sum: 1 },
-        },
-      },
-      {
-        $sort: { count: -1 },
-      },
-    ]);
+    const where = { createdAt: { gte: startDate } };
 
-    // Get most active admins
-    const activeAdmins = await AuditLog.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: startDate },
-        },
-      },
-      {
-        $group: {
-          _id: { id: "$adminId", email: "$adminEmail", name: "$adminName" },
-          count: { $sum: 1 },
-        },
-      },
-      {
-        $sort: { count: -1 },
-      },
-      {
-        $limit: 10,
-      },
+    // Los $group de Mongo se traducen a groupBy: son agregaciones sobre una
+    // sola tabla, sin joins.
+    const [actionGroups, adminGroups, failedLogins] = await Promise.all([
+      auditLogs().groupBy({
+        by: ["action"],
+        where,
+        _count: { _all: true },
+        orderBy: { _count: { action: "desc" } },
+      }),
+      auditLogs().groupBy({
+        by: ["adminId", "adminEmail", "adminName"],
+        where,
+        _count: { _all: true },
+        orderBy: { _count: { adminId: "desc" } },
+        take: 10,
+      }),
+      auditLogs().findMany({
+        where: { action: "LOGIN_FAILED", createdAt: { gte: startDate } },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { adminEmail: true, ip: true, createdAt: true, errorMessage: true },
+      }),
     ]);
-
-    // Get recent failed logins
-    const failedLogins = await AuditLog.find({
-      action: "LOGIN_FAILED",
-      createdAt: { $gte: startDate },
-    })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .select("adminEmail ip createdAt errorMessage");
 
     res.send({
       period: `Last ${days} days`,
-      actionStats,
-      activeAdmins,
+      // Se conserva la forma { _id, count } que ya consumía el panel.
+      actionStats: actionGroups.map((g) => ({ _id: g.action, count: g._count._all })),
+      activeAdmins: adminGroups.map((g) => ({
+        _id: { id: g.adminId, email: g.adminEmail, name: g.adminName },
+        count: g._count._all,
+      })),
       failedLogins,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 

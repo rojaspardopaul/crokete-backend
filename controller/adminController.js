@@ -20,35 +20,50 @@ const {
   getUserAgentFromRequest,
   getChanges 
 } = require("../lib/security/auditLogger");
-const Admin = require("../models/Admin");
+const { getPrisma } = require("../lib/prisma");
+const { adminToApi, roleToDb, roleToApi } = require("../lib/prisma/presenters");
+const { isUuid } = require("../lib/prisma/helpers");
+
+const admins = () => getPrisma().admin;
+
+/** El email es único en la base y siempre se guarda en minúsculas. */
+const byEmail = (email) => ({ email: String(email || "").toLowerCase() });
 
 const registerAdmin = async (req, res) => {
   try {
-    const isAdded = await Admin.findOne({ email: req.body.email });
+    const isAdded = await admins().findUnique({ where: byEmail(req.body.email) });
     if (isAdded) {
       return res.status(403).send({
         message: "Este correo electrónico ya está registrado",
       });
-    } else {
-      const newStaff = new Admin({
-        name: req.body.name,
-        email: req.body.email,
-        role: req.body.role,
-        password: bcrypt.hashSync(req.body.password),
-        access_list: req.body.access_list?.length > 0 ? req.body.access_list : ['dashboard', 'edit-profile'], // any new admin must have at least one access right, otherwise he will not be able to login
-      });
-      const staff = await newStaff.save();
-      const token = signInToken(staff);
-      res.send({
-        token,
-        _id: staff._id,
-        name: staff.name,
-        email: staff.email,
-        role: staff.role,
-        joiningData: Date.now(),
-        access_list: staff.access_list,
-      });
     }
+
+    const staff = await admins().create({
+      data: {
+        name: req.body.name,
+        ...byEmail(req.body.email),
+        role: roleToDb(req.body.role) || "admin",
+        password: bcrypt.hashSync(req.body.password),
+        // Todo administrador necesita al menos un permiso; sin ninguno no
+        // podría siquiera entrar al panel.
+        accessList:
+          req.body.access_list?.length > 0
+            ? req.body.access_list
+            : ["dashboard", "edit-profile"],
+      },
+    });
+
+    const presented = adminToApi(staff);
+    const token = signInToken(presented);
+    res.send({
+      token,
+      _id: presented._id,
+      name: presented.name,
+      email: presented.email,
+      role: presented.role,
+      joiningData: Date.now(),
+      access_list: presented.access_list,
+    });
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -62,9 +77,10 @@ const loginAdmin = async (req, res) => {
     const ip = getIpFromRequest(req);
     const userAgent = getUserAgentFromRequest(req);
 
-    const admin = await Admin.findOne({ email });
-    
-    if (admin && bcrypt.compareSync(password, admin.password)) {
+    const row = await admins().findUnique({ where: byEmail(email) });
+    const admin = row ? adminToApi(row) : null;
+
+    if (row && bcrypt.compareSync(password, row.password)) {
       if (admin?.status === "inactivo") {
         // Record failed attempt for inactive account
         await recordFailedAttempt(email, ip);
@@ -146,7 +162,8 @@ const loginAdmin = async (req, res) => {
 };
 
 const forgetPassword = async (req, res) => {
-  const isAdded = await Admin.findOne({ email: req.body.verifyEmail });
+  const found = await admins().findUnique({ where: byEmail(req.body.verifyEmail) });
+  const isAdded = found ? adminToApi(found) : null;
   if (!isAdded) {
     return res.status(404).send({
       message: "No se encontró ningún administrador con este correo electrónico",
@@ -215,29 +232,43 @@ const forgetPassword = async (req, res) => {
 
 const resetPassword = async (req, res) => {
   const token = req.body.token;
-  const { email } = jwt.decode(token);
-  const staff = await Admin.findOne({ email: email });
+  if (!token) {
+    return res.status(400).send({ message: "Token requerido" });
+  }
 
-  if (token) {
-    jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY, (err, decoded) => {
-      if (err) {
-        return res.status(500).send({
-          message: "El token ha expirado, por favor intenta de nuevo",
-        });
-      } else {
-        staff.password = bcrypt.hashSync(req.body.newPassword);
-        staff.save();
-        res.send({
-          message: "Tu contraseña ha sido cambiada exitosamente. Ya puedes iniciar sesión",
-        });
-      }
+  try {
+    // Se verifica la firma ANTES de tocar la base: antes se cargaba el usuario
+    // a partir de un token sin validar.
+    jwt.verify(token, process.env.JWT_SECRET_FOR_VERIFY);
+  } catch (err) {
+    return res.status(500).send({
+      message: "El token ha expirado, por favor intenta de nuevo",
     });
+  }
+
+  try {
+    const { email } = jwt.decode(token);
+    const staff = await admins().findUnique({ where: byEmail(email) });
+    if (!staff) {
+      return res.status(404).send({ message: "Administrador no encontrado" });
+    }
+
+    await admins().update({
+      where: { id: staff.id },
+      data: { password: bcrypt.hashSync(req.body.newPassword) },
+    });
+
+    res.send({
+      message: "Tu contraseña ha sido cambiada exitosamente. Ya puedes iniciar sesión",
+    });
+  } catch (err) {
+    res.status(500).send({ message: err.message });
   }
 };
 
 const addStaff = async (req, res) => {
   try {
-    const isAdded = await Admin.findOne({ email: req.body.email });
+    const isAdded = await admins().findUnique({ where: byEmail(req.body.email) });
     if (isAdded) {
       return res.status(500).send({
         message: "Este correo electrónico ya está registrado",
@@ -269,17 +300,19 @@ const addStaff = async (req, res) => {
       });
     }
 
-    const newStaff = new Admin({
-      name: { ...req.body.name },
-      email: req.body.email,
-      password: bcrypt.hashSync(req.body.password),
-      phone: req.body.phone,
-      joiningDate: req.body.joiningDate,
-      role: req.body.role,
-      image: req.body.image,
-      access_list: req.body.access_list,
+    const created = await admins().create({
+      data: {
+        name: { ...req.body.name },
+        ...byEmail(req.body.email),
+        password: bcrypt.hashSync(req.body.password),
+        phone: req.body.phone,
+        joiningDate: req.body.joiningDate ? new Date(req.body.joiningDate) : null,
+        role: roleToDb(req.body.role),
+        image: req.body.image,
+        accessList: req.body.access_list,
+      },
     });
-    await newStaff.save();
+    const newStaff = adminToApi(created);
 
     // Log admin creation
     await logAction({
@@ -309,10 +342,9 @@ const addStaff = async (req, res) => {
 };
 
 const getAllStaff = async (req, res) => {
-  // console.log('allamdin')
   try {
-    const admins = await Admin.find({}).sort({ _id: -1 });
-    res.send(admins);
+    const rows = await admins().findMany({ orderBy: { createdAt: "desc" } });
+    res.send(rows.map(adminToApi));
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -322,8 +354,12 @@ const getAllStaff = async (req, res) => {
 
 const getStaffById = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.params.id);
-    res.send(admin);
+    if (!isUuid(req.params.id)) {
+      return res.status(404).send({ message: "Personal no encontrado" });
+    }
+    const row = await admins().findUnique({ where: { id: req.params.id } });
+    if (!row) return res.status(404).send({ message: "Personal no encontrado" });
+    res.send(adminToApi(row));
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -333,20 +369,25 @@ const getStaffById = async (req, res) => {
 
 const updateStaff = async (req, res) => {
   try {
-    const admin = await Admin.findOne({ _id: req.params.id });
+    if (!isUuid(req.params.id)) {
+      return res.status(404).send({ message: "Personal no encontrado" });
+    }
+    const current = await admins().findUnique({ where: { id: req.params.id } });
 
-    if (!admin) {
+    if (!current) {
       return res.status(404).send({
         message: "Personal no encontrado",
       });
     }
+    const admin = adminToApi(current);
 
     // Prevent modifying another super admin unless you're also a super admin
     // This is already enforced by isSuperAdmin middleware, but double-check
-    if (admin.role === "super admin" && req.user._id !== admin._id.toString()) {
-      // Only super admins can modify other super admins
-      const requestingAdmin = await Admin.findById(req.user._id);
-      if (requestingAdmin.role !== "super admin") {
+    if (current.role === "super_admin" && req.user._id !== current.id) {
+      const requestingAdmin = isUuid(req.user._id)
+        ? await admins().findUnique({ where: { id: req.user._id } })
+        : null;
+      if (!requestingAdmin || requestingAdmin.role !== "super_admin") {
         return res.status(403).send({
           message: "Solo los super administradores pueden modificar otras cuentas de super administrador",
         });
@@ -363,15 +404,19 @@ const updateStaff = async (req, res) => {
     };
 
     // Update fields
-    admin.name = { ...admin.name, ...req.body.name };
-    admin.email = req.body.email;
-    admin.phone = req.body.phone;
-    admin.role = req.body.role;
-    admin.access_list = req.body.access_list;
-    admin.joiningData = req.body.joiningDate;
-    admin.image = req.body.image;
-
-    const updatedAdmin = await admin.save();
+    const updated = await admins().update({
+      where: { id: req.params.id },
+      data: {
+        name: { ...(current.name || {}), ...(req.body.name || {}) },
+        ...(req.body.email !== undefined ? byEmail(req.body.email) : {}),
+        phone: req.body.phone,
+        role: roleToDb(req.body.role),
+        accessList: req.body.access_list,
+        joiningDate: req.body.joiningDate ? new Date(req.body.joiningDate) : null,
+        image: req.body.image,
+      },
+    });
+    const updatedAdmin = adminToApi(updated);
 
     // Log admin update
     const changes = getChanges(oldValues, {
@@ -381,6 +426,7 @@ const updateStaff = async (req, res) => {
       role: updatedAdmin.role,
       access_list: updatedAdmin.access_list,
     });
+
 
     await logAction({
       adminId: req.user._id,
@@ -419,17 +465,21 @@ const updateStaff = async (req, res) => {
 
 const deleteStaff = async (req, res) => {
   try {
-    const adminToDelete = await Admin.findById(req.params.id);
-    
-    if (!adminToDelete) {
+    if (!isUuid(req.params.id)) {
+      return res.status(404).send({ message: "Personal no encontrado" });
+    }
+    const found = await admins().findUnique({ where: { id: req.params.id } });
+
+    if (!found) {
       return res.status(404).send({
         message: "Personal no encontrado",
       });
     }
+    const adminToDelete = adminToApi(found);
 
     // Prevent deleting the last super admin
-    if (adminToDelete.role === "super admin") {
-      const superAdminCount = await Admin.countDocuments({ role: "super admin" });
+    if (found.role === "super_admin") {
+      const superAdminCount = await admins().count({ where: { role: "super_admin" } });
       if (superAdminCount <= 1) {
         return res.status(403).send({
           message: "No se puede eliminar al último super administrador. Debe existir al menos un super administrador.",
@@ -437,7 +487,7 @@ const deleteStaff = async (req, res) => {
       }
     }
 
-    await Admin.deleteOne({ _id: req.params.id });
+    await admins().delete({ where: { id: req.params.id } });
 
     // Log admin deletion
     await logAction({
@@ -465,19 +515,22 @@ const deleteStaff = async (req, res) => {
 const updatedStatus = async (req, res) => {
   try {
     const newStatus = req.body.status;
-    const adminToUpdate = await Admin.findById(req.params.id);
+    if (!isUuid(req.params.id)) {
+      return res.status(404).send({ message: "Personal no encontrado" });
+    }
+    const found = await admins().findUnique({ where: { id: req.params.id } });
 
-    if (!adminToUpdate) {
+    if (!found) {
       return res.status(404).send({
         message: "Personal no encontrado",
       });
     }
+    const adminToUpdate = adminToApi(found);
 
     // Prevent deactivating the last super admin
-    if (adminToUpdate.role === "super admin" && newStatus === "inactivo") {
-      const activeSuperAdminCount = await Admin.countDocuments({ 
-        role: "super admin", 
-        status: "activo" 
+    if (found.role === "super_admin" && newStatus === "inactivo") {
+      const activeSuperAdminCount = await admins().count({
+        where: { role: "super_admin", status: "activo" },
       });
       if (activeSuperAdminCount <= 1) {
         return res.status(403).send({
@@ -486,14 +539,7 @@ const updatedStatus = async (req, res) => {
       }
     }
 
-    await Admin.updateOne(
-      { _id: req.params.id },
-      {
-        $set: {
-          status: newStatus,
-        },
-      }
-    );
+    await admins().update({ where: { id: req.params.id }, data: { status: newStatus } });
 
     // Log status update
     await logAction({
@@ -527,15 +573,19 @@ const updatedStatus = async (req, res) => {
 // Get current admin's own profile
 const getMyProfile = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.user._id).select('-password');
-    
-    if (!admin) {
+    if (!isUuid(req.user._id)) {
+      return res.status(404).send({ message: "Administrador no encontrado" });
+    }
+    const row = await admins().findUnique({ where: { id: req.user._id } });
+
+    if (!row) {
       return res.status(404).send({
         message: "Administrador no encontrado",
       });
     }
 
-    res.send(admin);
+    // adminToApi ya descarta la contraseña.
+    res.send(adminToApi(row));
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -546,26 +596,32 @@ const getMyProfile = async (req, res) => {
 // Update current admin's own profile (cannot change role)
 const updateMyProfile = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.user._id);
-    
-    if (!admin) {
+    if (!isUuid(req.user._id)) {
+      return res.status(404).send({ message: "Administrador no encontrado" });
+    }
+    const current = await admins().findUnique({ where: { id: req.user._id } });
+
+    if (!current) {
       return res.status(404).send({
         message: "Administrador no encontrado",
       });
     }
 
     // Only allow updating specific fields (NOT role)
-    if (req.body.name) admin.name = { ...admin.name, ...req.body.name };
-    if (req.body.email) admin.email = req.body.email;
-    if (req.body.phone) admin.phone = req.body.phone;
-    if (req.body.image) admin.image = req.body.image;
-    
+    const updates = {};
+    if (req.body.name) updates.name = { ...(current.name || {}), ...req.body.name };
+    if (req.body.email) Object.assign(updates, byEmail(req.body.email));
+    if (req.body.phone) updates.phone = req.body.phone;
+    if (req.body.image) updates.image = req.body.image;
+
     // Allow password change if provided
-    if (req.body.password && req.body.password.trim() !== '') {
-      admin.password = bcrypt.hashSync(req.body.password);
+    if (req.body.password && req.body.password.trim() !== "") {
+      updates.password = bcrypt.hashSync(req.body.password);
     }
 
-    const updatedAdmin = await admin.save();
+    const updatedAdmin = adminToApi(
+      await admins().update({ where: { id: req.user._id }, data: updates })
+    );
     const token = signInToken(updatedAdmin);
 
     const { data, iv } = handleEncryptData([

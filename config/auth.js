@@ -1,7 +1,9 @@
 require("dotenv").config();
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const Admin = require("../models/Admin");
+const { getPrisma } = require("../lib/prisma");
+const { isUuid } = require("../lib/prisma/helpers");
+const { adminToApi } = require("../lib/prisma/presenters");
 
 const signInToken = (user) => {
   return jwt.sign(
@@ -83,12 +85,24 @@ const isAdmin = async (req, res, next) => {
     if (!req.user) {
       return res.status(401).send({ message: "Autenticación requerida" });
     }
-    // Any active entry in the Admin collection is valid — role differentiation is handled by isSuperAdmin
-    const admin = await Admin.findOne({ _id: req.user._id, status: "activo" });
-    if (!admin) {
-      return res.status(403).send({ message: "Acceso denegado. Se requieren privilegios de administrador." });
+    // Un token emitido antes de la migración lleva un ObjectId de Mongo, que
+    // Postgres rechazaría como uuid inválido: se trata como acceso denegado.
+    if (!isUuid(req.user._id)) {
+      return res.status(403).send({
+        message: "Acceso denegado. Se requieren privilegios de administrador.",
+      });
     }
-    req.admin = admin;
+
+    // Basta con estar activo: la distinción de rol la hace isSuperAdmin.
+    const admin = await getPrisma().admin.findFirst({
+      where: { id: req.user._id, status: "activo" },
+    });
+    if (!admin) {
+      return res.status(403).send({
+        message: "Acceso denegado. Se requieren privilegios de administrador.",
+      });
+    }
+    req.admin = adminToApi(admin);
     next();
   } catch (err) {
     res.status(500).send({ message: "Error interno del servidor" });
@@ -98,28 +112,26 @@ const isAdmin = async (req, res, next) => {
 const isSuperAdmin = async (req, res, next) => {
   try {
     if (!req.user) {
-      return res.status(401).send({
-        message: "Autenticación requerida",
-      });
+      return res.status(401).send({ message: "Autenticación requerida" });
+    }
+    if (!isUuid(req.user._id)) {
+      return res.status(404).send({ message: "Administrador no encontrado" });
     }
 
-    // Fetch the admin from database to verify current role
-    const admin = await Admin.findById(req.user._id);
-    
+    // Se relee de la base para verificar el rol vigente, no el del token.
+    const admin = await getPrisma().admin.findUnique({ where: { id: req.user._id } });
+
     if (!admin) {
-      return res.status(404).send({
-        message: "Administrador no encontrado",
-      });
+      return res.status(404).send({ message: "Administrador no encontrado" });
     }
 
-    if (admin.role !== "super admin") {
+    if (admin.role !== "super_admin") {
       return res.status(403).send({
         message: "Acceso denegado. Se requieren privilegios de super administrador.",
       });
     }
 
-    // Add admin to request for use in controllers
-    req.admin = admin;
+    req.admin = adminToApi(admin);
     next();
   } catch (err) {
     res.status(500).send({ message: "Error interno del servidor" });
