@@ -1,194 +1,140 @@
-const Currencie= require('../models/Currency');
-const { mongo_connection } = require('../config/db'); // CCDev
+const { getPrisma } = require("../lib/prisma");
+const { currencyToApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
+
+const prisma = () => getPrisma().currency;
+
+/** El panel envía `live_exchange_rates`; en la base la columna es camelCase. */
+function toRow(body) {
+  const row = {};
+  if (body.name !== undefined) row.name = body.name;
+  if (body.symbol !== undefined) row.symbol = body.symbol;
+  if (body.status !== undefined) row.status = body.status;
+  if (body.live_exchange_rates !== undefined) {
+    row.liveExchangeRates = body.live_exchange_rates;
+  }
+  return row;
+}
 
 const addCurrency = async (req, res) => {
   try {
-   
-      const newCurrency = new Currencie(req.body);
-      await newCurrency.save();
-      res.send({
-        message: '¡Moneda agregada correctamente!',
-      });
-    } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    await prisma().create({ data: toRow(req.body) });
+    res.send({ message: "¡Moneda agregada correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const addAllCurrency = async (req, res) => {
   try {
-    
-      await Currencie.insertMany(req.body);
-      res.send({ message: '¡Monedas agregadas correctamente!' });
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    await prisma().createMany({ data: (req.body || []).map(toRow) });
+    res.send({ message: "¡Monedas agregadas correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getAllCurrency = async (req, res) => {
   try {
-   
-      const Currencies = await Currencie.find({});
-      res.send(Currencies);
-    } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    const rows = await prisma().findMany();
+    res.send(rows.map(currencyToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getShowingCurrency = async (req, res) => {
   try {
-   
-      const currencies = await Currencie.find({ status: 'show' }).sort({
-        _id: -1,
-      });
-      res.send(currencies);
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
+    const rows = await prisma().findMany({
+      where: { status: "show" },
+      orderBy: { createdAt: "desc" },
     });
+    res.send(rows.map(currencyToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getCurrencyById = async (req, res) => {
   try {
-    
-      const currency = await Currencie.findById(req.params.id);
-      res.send(currency);
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Moneda no encontrada.");
+    const row = await prisma().findUnique({ where: { id: req.params.id } });
+    if (!row) return notFound(res, "Moneda no encontrada.");
+    res.send(currencyToApi(row));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const updateCurrency = async (req, res) => {
   try {
-    
-      const currency = await Currencie.findById(req.params.id);
-
-      if (currency) {
-        currency.name = req.body.name;
-        currency.symbol = req.body.symbol;
-        currency.iso_code = req.body.iso_code;
-        currency.exchange_rate = req.body.exchange_rate;
-        currency.status = req.body.status;
-        currency.live_exchange_rates = req.body.live_exchange_rates;
-      }
-
-      await currency.save();
-      res.send({
-        message: '¡Moneda actualizada correctamente!',
-      });
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Moneda no encontrada.");
+    await prisma().update({ where: { id: req.params.id }, data: toRow(req.body) });
+    res.send({ message: "¡Moneda actualizada correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const updateManyCurrency = async (req, res) => {
   try {
-  
-      await Currencie.updateMany(
-        { _id: { $in: req.body.ids } },
-        {
-          $set: {
-            status: req.body.status,
-            live_exchange_rates: req.body.live_exchange_rates,
-          },
-        },
-        {
-          multi: true,
-        }
-      );
-    
-    res.send({
-      message: '¡Monedas actualizadas correctamente!',
-    });
+    const data = {};
+    if (req.body.status !== undefined) data.status = req.body.status;
+    if (req.body.live_exchange_rates !== undefined) {
+      data.liveExchangeRates = req.body.live_exchange_rates;
+    }
+    await prisma().updateMany({ where: { id: { in: uuidList(req.body.ids) } }, data });
+    res.send({ message: "¡Monedas actualizadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateEnabledStatus = async (req, res) => {
   try {
-
-    const newStatus = req.body.status;
-
-  
-      await Currencie.updateOne(
-        { _id: req.params.id },
-        {
-          $set: {
-            status: req.body.status,
-          },
-        }
-      );
-      res.status(200).send({
-        message: `Moneda ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
-      });
-    } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Moneda no encontrada.");
+    const status = req.body.status;
+    await prisma().update({ where: { id: req.params.id }, data: { status } });
+    res.status(200).send({
+      message: `Moneda ${status === "show" ? "publicada" : "ocultada"} correctamente!`,
     });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const updateLiveExchangeRateStatus = async (req, res) => {
   try {
-   
-    const newStatus = req.body.live_exchange_rates;
-
-      await Currencie.updateOne(
-        { _id: req.params.id },
-        {
-          $set: {
-            live_exchange_rates: req.body.live_exchange_rates,
-          },
-        }
-      );
-      res.status(200).send({
-        message: `Moneda ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
-      });
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Moneda no encontrada.");
+    const status = req.body.live_exchange_rates;
+    await prisma().update({
+      where: { id: req.params.id },
+      data: { liveExchangeRates: status },
     });
+    res.status(200).send({
+      message: `Moneda ${status === "show" ? "publicada" : "ocultada"} correctamente!`,
+    });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const deleteCurrency = async (req, res) => {
   try {
-    
-      await Currencie.deleteOne({ _id: req.params.id });
-      res.send({
-        message: '¡Moneda eliminada correctamente!',
-      });
-    } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Moneda no encontrada.");
+    await prisma().delete({ where: { id: req.params.id } });
+    res.send({ message: "¡Moneda eliminada correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const deleteManyCurrency = async (req, res) => {
   try {
-    
-      await Currencie.deleteMany({ _id: req.body.ids });
-      res.send({
-        message: `¡Moneda eliminada correctamente!`,
-      });
-    }  catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    await prisma().deleteMany({ where: { id: { in: uuidList(req.body.ids) } } });
+    res.send({ message: "¡Moneda eliminada correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 

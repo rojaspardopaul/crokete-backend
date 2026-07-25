@@ -1,333 +1,274 @@
-const Category = require("../models/Category");
-const Brand = require("../models/Brand");
-const Product = require("../models/Product");
+const { getPrisma } = require("../lib/prisma");
+const { toApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
 const { invalidateCategories, invalidateAll } = require("../lib/cache/invalidation");
-const {
-  buildCategoryTree,
-  normalizeId,
-  normalizeEntityId,
-  VISIBLE_STATUS_FILTER,
-} = require("../utils/categoryHierarchy");
+const { buildCategoryTree, normalizeId, normalizeEntityId } = require("../utils/categoryHierarchy");
+
+const prisma = () => getPrisma();
+const categories = () => getPrisma().category;
+
+/** Texto de un campo multi-idioma, para los campos planos que espera el panel. */
+function localized(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return value.es || value.en || Object.values(value)[0] || "";
+}
+
+/**
+ * Forma heredada de categoría. `parentName` era un campo desnormalizado en
+ * Mongo; aquí se deriva de la relación real, que es la fuente de verdad.
+ */
+function categoryToApi(c) {
+  return {
+    ...toApi(c),
+    parentId: c.parentId || null,
+    parentName: c.parent ? localized(c.parent.name) : "",
+  };
+}
+
+const WITH_PARENT = { parent: { select: { name: true } } };
+
+function toRow(body) {
+  const row = {};
+  if (body.name !== undefined) row.name = body.name;
+  if (body.description !== undefined) row.description = body.description;
+  if (body.slug !== undefined) row.slug = body.slug || null;
+  if (body.icon !== undefined) row.icon = body.icon;
+  if (body.status !== undefined) row.status = body.status;
+  if (body.parentId !== undefined) row.parentId = isUuid(body.parentId) ? body.parentId : null;
+  return row;
+}
 
 const addCategory = async (req, res) => {
   try {
-    const newCategory = new Category(req.body);
-    await newCategory.save();
+    await categories().create({ data: toRow(req.body) });
     invalidateCategories();
-    res.status(200).send({
-      message: "¡Categoría agregada correctamente!",
-    });
+    res.status(200).send({ message: "¡Categoría agregada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// all multiple category
 const addAllCategory = async (req, res) => {
-  // console.log("category", req.body);
   try {
-    await Category.deleteMany();
-
-    await Category.insertMany(req.body);
-
+    await categories().deleteMany();
+    // Se insertan de una en una porque las hijas necesitan que la padre exista.
+    for (const item of req.body || []) {
+      await categories().create({ data: toRow(item) });
+    }
     invalidateAll();
-    res.status(200).send({
-      message: "¡Categoría agregada correctamente!",
-    });
+    res.status(200).send({ message: "¡Categoría agregada correctamente!" });
   } catch (err) {
-    // console.log(err.message);
-
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// get status show category
 const getShowingCategory = async (req, res) => {
   try {
-    const categories = await Category.find({ status: "show" }).sort({ _id: -1 }).lean();
-    const data = await buildShowingCategoryTree(categories);
+    const rows = await categories().findMany({
+      where: { status: "show" },
+      include: WITH_PARENT,
+      orderBy: { createdAt: "desc" },
+    });
+    const data = await buildShowingCategoryTree(rows.map(categoryToApi));
 
-    // relatedBrands depends on live product-brand relations and must not be stale.
+    // relatedBrands depende de relaciones producto-marca vivas: no debe cachearse.
     res.set("Cache-Control", "no-store");
     res.send(data);
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// get all category parent and child
 const getAllCategory = async (req, res) => {
   try {
-    const categories = await Category.find({}).sort({ _id: -1 }).lean();
-
-    const categoryList = buildCategoryTree(categories);
-    //  console.log('categoryList',categoryList)
-    res.send(categoryList);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    const rows = await categories().findMany({
+      include: WITH_PARENT,
+      orderBy: { createdAt: "desc" },
     });
+    res.send(buildCategoryTree(rows.map(categoryToApi)));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getAllCategories = async (req, res) => {
   try {
-    const categories = await Category.find({}).sort({ _id: -1 });
-
-    res.send(categories);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    const rows = await categories().findMany({
+      include: WITH_PARENT,
+      orderBy: { createdAt: "desc" },
     });
+    res.send(rows.map(categoryToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getCategoryById = async (req, res) => {
   try {
-    const category = await Category.findById(req.params.id);
-    res.send(category);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Categoría no encontrada.");
+    const row = await categories().findUnique({
+      where: { id: req.params.id },
+      include: WITH_PARENT,
     });
+    if (!row) return notFound(res, "Categoría no encontrada.");
+    res.send(categoryToApi(row));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
-// category update
 const updateCategory = async (req, res) => {
   try {
-    const category = await Category.findById(req.params.id);
-    if (category) {
-      category.name = { ...category.name, ...req.body.name };
-      category.description = {
-        ...category.description,
-        ...req.body.description,
-      };
-      category.icon = req.body.icon;
-      category.status = req.body.status;
-      category.parentId = req.body.parentId
-        ? req.body.parentId
-        : category.parentId;
-      category.parentName = req.body.parentName;
+    if (!isUuid(req.params.id)) return notFound(res, "Categoría no encontrada.");
+    const current = await categories().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "Categoría no encontrada.");
 
-      await category.save();
-      invalidateCategories();
-      res.send({ message: "¡Categoría actualizada correctamente!" });
+    const data = toRow(req.body);
+    // El panel puede enviar un único idioma: se fusiona con lo existente.
+    if (req.body.name !== undefined) {
+      data.name = { ...(current.name || {}), ...(req.body.name || {}) };
     }
+    if (req.body.description !== undefined) {
+      data.description = { ...(current.description || {}), ...(req.body.description || {}) };
+    }
+    // Sin parentId en el body se conserva el actual (comportamiento heredado).
+    if (!req.body.parentId) delete data.parentId;
+
+    await categories().update({ where: { id: req.params.id }, data });
+    invalidateCategories();
+    res.send({ message: "¡Categoría actualizada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// udpate many category
 const updateManyCategory = async (req, res) => {
   try {
-    const updatedData = {};
-    for (const key of Object.keys(req.body)) {
-      if (
-        req.body[key] !== "[]" &&
-        Object.entries(req.body[key]).length > 0 &&
-        req.body[key] !== req.body.ids
-      ) {
-        updatedData[key] = req.body[key];
-      }
-    }
-
-    await Category.updateMany(
-      { _id: { $in: req.body.ids } },
-      {
-        $set: updatedData,
-      },
-      {
-        multi: true,
-      }
-    );
-
+    const data = toRow(req.body);
+    delete data.name; // no tiene sentido aplicar el mismo nombre a varias
+    await categories().updateMany({ where: { id: { in: uuidList(req.body.ids) } }, data });
     invalidateCategories();
-    res.send({
-      message: "¡Categorías actualizadas correctamente!",
-    });
+    res.send({ message: "¡Categorías actualizadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// category update status
 const updateStatus = async (req, res) => {
-  // console.log('update status')
   try {
-    const newStatus = req.body.status;
-
-    await Category.updateOne(
-      { _id: req.params.id },
-      {
-        $set: {
-          status: newStatus,
-        },
-      }
-    );
+    if (!isUuid(req.params.id)) return notFound(res, "Categoría no encontrada.");
+    const status = req.body.status;
+    await categories().update({ where: { id: req.params.id }, data: { status } });
     invalidateCategories();
     res.status(200).send({
-      message: `Categoría ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
+      message: `Categoría ${status === "show" ? "publicada" : "ocultada"} correctamente!`,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
-//single category delete
+
 const deleteCategory = async (req, res) => {
   try {
-    console.log("id cat >>", req.params.id);
-    await Category.deleteOne({ _id: req.params.id });
-    await Category.deleteMany({ parentId: req.params.id });
+    if (!isUuid(req.params.id)) return notFound(res, "Categoría no encontrada.");
+    // Se replica el comportamiento heredado: borrar la categoría arrastra a sus
+    // hijas directas (la FK sólo pondría parentId a NULL).
+    await categories().deleteMany({ where: { parentId: req.params.id } });
+    await categories().delete({ where: { id: req.params.id } });
     invalidateCategories();
-    res.status(200).send({
-      message: "¡Categoría eliminada correctamente!",
-    });
+    res.status(200).send({ message: "¡Categoría eliminada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
-
-  //This is for delete children category
-  // Category.updateOne(
-  //   { _id: req.params.id },
-  //   {
-  //     $pull: { children: req.body.title },
-  //   },
-  //   (err) => {
-  //     if (err) {
-  //       res.status(500).send({ message: err.message });
-  //     } else {
-  //       res.status(200).send({
-  //         message: '¡Categoría eliminada correctamente!',
-  //       });
-  //     }
-  //   }
-  // );
 };
 
-// all multiple category delete
 const deleteManyCategory = async (req, res) => {
   try {
-    const categories = await Category.find({}).sort({ _id: -1 });
-
-    await Category.deleteMany({ parentId: req.body.ids });
-    await Category.deleteMany({ _id: req.body.ids });
-
+    const ids = uuidList(req.body.ids);
+    await categories().deleteMany({ where: { parentId: { in: ids } } });
+    await categories().deleteMany({ where: { id: { in: ids } } });
     invalidateCategories();
-    res.status(200).send({
-      message: "¡Categorías eliminadas correctamente!",
-    });
+    res.status(200).send({ message: "¡Categorías eliminadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
-const buildShowingCategoryTree = async (categories) => {
-  const categoryTree = buildCategoryTree(categories);
 
-  if (categories.length === 0) {
-    return categoryTree;
-  }
+/**
+ * Añade a cada nodo del árbol las marcas disponibles bajo esa categoría,
+ * propagando las de las hijas hacia la madre (el menú de la tienda las muestra
+ * al pasar el cursor).
+ */
+const buildShowingCategoryTree = async (cats) => {
+  const categoryTree = buildCategoryTree(cats);
+  if (cats.length === 0) return categoryTree;
 
-  const visibleCategoryIds = new Set(
-    categories.map((category) => normalizeId(category._id)).filter(Boolean)
-  );
+  const visibleCategoryIds = new Set(cats.map((c) => normalizeId(c._id)).filter(Boolean));
 
-  const products = await Product.find({
-    brand: { $ne: null },
-    ...VISIBLE_STATUS_FILTER,
-  })
-    .select("brand categories category")
-    .lean();
+  const products = await prisma().product.findMany({
+    where: { brandId: { not: null }, status: "show" },
+    select: { brandId: true, categoryId: true, categories: { select: { categoryId: true } } },
+  });
 
   const directBrandsByCategory = new Map();
   const usedBrandIds = new Set();
 
   for (const product of products) {
-    const productBrandId = normalizeEntityId(product.brand);
-
-    if (!productBrandId) {
-      continue;
-    }
+    const brandId = normalizeEntityId(product.brandId);
+    if (!brandId) continue;
 
     const relatedCategoryIds = new Set(
-      [...(product.categories || []), product.category]
-        .map((value) => normalizeEntityId(value))
-        .filter((value) => value && visibleCategoryIds.has(value))
+      [...product.categories.map((pc) => pc.categoryId), product.categoryId]
+        .map(normalizeEntityId)
+        .filter((id) => id && visibleCategoryIds.has(id))
     );
+    if (relatedCategoryIds.size === 0) continue;
 
-    if (relatedCategoryIds.size === 0) {
-      continue;
-    }
-
-    usedBrandIds.add(productBrandId);
-
+    usedBrandIds.add(brandId);
     for (const categoryId of relatedCategoryIds) {
       if (!directBrandsByCategory.has(categoryId)) {
         directBrandsByCategory.set(categoryId, new Set());
       }
-
-      directBrandsByCategory.get(categoryId).add(productBrandId);
+      directBrandsByCategory.get(categoryId).add(brandId);
     }
   }
 
-  const brands = await Brand.find({
-    _id: { $in: Array.from(usedBrandIds) },
-    ...VISIBLE_STATUS_FILTER,
-  })
-    .select("name image status")
-    .lean();
+  const brands = await prisma().brand.findMany({
+    where: { id: { in: Array.from(usedBrandIds) }, status: "show" },
+    select: { id: true, name: true, image: true, status: true },
+  });
 
   const brandById = new Map(
-    brands.map((brand) => [
-      normalizeId(brand._id),
-      {
-        _id: brand._id,
-        name: brand.name,
-        image: brand.image,
-        status: brand.status,
-      },
+    brands.map((b) => [
+      normalizeId(b.id),
+      { _id: b.id, id: b.id, name: b.name, image: b.image, status: b.status },
     ])
   );
 
-  return categoryTree.map((node) => decorateCategoryNode(node, directBrandsByCategory, brandById).node);
+  return categoryTree.map(
+    (node) => decorateCategoryNode(node, directBrandsByCategory, brandById).node
+  );
 };
 
 const decorateCategoryNode = (categoryNode, directBrandsByCategory, brandById) => {
-  const decoratedChildren = categoryNode.children.map((childNode) =>
-    decorateCategoryNode(childNode, directBrandsByCategory, brandById)
+  const decoratedChildren = categoryNode.children.map((child) =>
+    decorateCategoryNode(child, directBrandsByCategory, brandById)
   );
 
   const relatedBrandIds = new Set(
     directBrandsByCategory.get(normalizeId(categoryNode._id)) || []
   );
-
   for (const child of decoratedChildren) {
-    child.relatedBrandIds.forEach((brandId) => relatedBrandIds.add(brandId));
+    child.relatedBrandIds.forEach((id) => relatedBrandIds.add(id));
   }
 
   return {
     node: {
       ...categoryNode,
-      children: decoratedChildren.map((child) => child.node),
+      children: decoratedChildren.map((c) => c.node),
       relatedBrands: Array.from(relatedBrandIds)
-        .map((brandId) => brandById.get(brandId))
+        .map((id) => brandById.get(id))
         .filter(Boolean),
     },
     relatedBrandIds,

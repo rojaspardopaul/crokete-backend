@@ -7,3 +7,7 @@ npm-debug.log*
 .DS_Store
 coverage
 .nyc_output
+.claude
+.agents
+.windsurf
+skills-lock.json

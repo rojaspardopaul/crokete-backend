@@ -15,8 +15,8 @@ COPY --chown=node:node . .
 RUN npm run build:ts
 RUN npm prune --omit=dev
 
-# Cloud Run requires port 8080
-ENV PORT=8080
+# Platform (Cloud Run, Railway, etc.) injects PORT at runtime; api/index.js
+# falls back to 5000 if unset. EXPOSE is documentation only, not a hard bind.
 ENV NODE_ENV=production
 EXPOSE 8080
 

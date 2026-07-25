@@ -1,167 +1,125 @@
-const Language = require("../models/Language");
-const { mongo_connection } = require("../config/db"); // CCDev
+const { getPrisma } = require("../lib/prisma");
+const { toApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
+
+const prisma = () => getPrisma().language;
+
+function toRow(body) {
+  const row = {};
+  if (body.name !== undefined) row.name = body.name;
+  if (body.code !== undefined) row.code = String(body.code).toLowerCase();
+  if (body.flag !== undefined) row.flag = body.flag;
+  if (body.status !== undefined) row.status = body.status;
+  return row;
+}
 
 const addLanguage = async (req, res) => {
   try {
-    const { name, code, flag } = req.body;
-    const exist = await Language.findOne({ name, code, flag });
+    const code = String(req.body.code || "").toLowerCase();
+    // `code` es único en la base; se comprueba antes para conservar el 400
+    // con mensaje propio en vez de un error de restricción.
+    const exist = await prisma().findUnique({ where: { code } });
     if (exist) {
-      return res.status(400).send({
-        message: "¡El idioma ya existe!",
-      });
+      return res.status(400).send({ message: "¡El idioma ya existe!" });
     }
-    const newLanguage = new Language(req.body);
-    await newLanguage.save();
-    res.send({
-      message: "¡Idioma agregado correctamente!",
-    });
+    await prisma().create({ data: toRow(req.body) });
+    res.send({ message: "¡Idioma agregado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const addAllLanguage = async (req, res) => {
   try {
-    await Language.insertMany(req.body);
+    await prisma().createMany({ data: (req.body || []).map(toRow), skipDuplicates: true });
     res.send({ message: "¡Zonas agregadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getAllLanguages = async (req, res) => {
-  // console.log('get all language')
   try {
-    const languages = await Language.find({});
-    // console.log('languages',languages)
-    res.send(languages);
+    res.send((await prisma().findMany()).map(toApi));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getShowingLanguage = async (req, res) => {
   try {
-    // console.log("getShowingLanguage");
-
-    // console.log('get showing language')
-    const languages = await Language.find({ status: "show" }).sort({
-      _id: -1,
+    const rows = await prisma().findMany({
+      where: { status: "show" },
+      orderBy: { createdAt: "desc" },
     });
-    res.send(languages);
+    res.send(rows.map(toApi));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getLanguageById = async (req, res) => {
   try {
-    const language = await Language.findById(req.params.id);
-    res.send(language);
+    if (!isUuid(req.params.id)) return notFound(res, "Idioma no encontrado.");
+    const row = await prisma().findUnique({ where: { id: req.params.id } });
+    if (!row) return notFound(res, "Idioma no encontrado.");
+    res.send(toApi(row));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateLanguage = async (req, res) => {
   try {
-    const language = await Language.findById(req.params.id);
-    if (language) {
-      language.name = req.body.name;
-      language.code = req.body.code;
-      language.flag = req.body.flag;
-      language.status = req.body.status;
-    }
-    await language.save();
-    res.send({
-      message: "¡Idioma actualizado correctamente!",
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Idioma no encontrado.");
+    await prisma().update({ where: { id: req.params.id }, data: toRow(req.body) });
+    res.send({ message: "¡Idioma actualizado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateManyLanguage = async (req, res) => {
   try {
-    await Language.updateMany(
-      { _id: { $in: req.body.ids } },
-      {
-        $set: {
-          status: req.body.status,
-        },
-      },
-      {
-        multi: true,
-      }
-    );
-
-    res.send({
-      message: "¡Idiomas actualizados correctamente!",
+    await prisma().updateMany({
+      where: { id: { in: uuidList(req.body.ids) } },
+      data: { status: req.body.status },
     });
+    res.send({ message: "¡Idiomas actualizados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateStatus = async (req, res) => {
   try {
-    const newStatus = req.body.status;
-
-    await Language.updateOne(
-      { _id: req.params.id },
-      {
-        $set: {
-          status: req.body.status,
-        },
-      }
-    );
+    if (!isUuid(req.params.id)) return notFound(res, "Idioma no encontrado.");
+    const status = req.body.status;
+    await prisma().update({ where: { id: req.params.id }, data: { status } });
     res.status(200).send({
-      message: `Idioma ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
+      message: `Idioma ${status === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteLanguage = async (req, res) => {
   try {
-    await Language.deleteOne({ _id: req.params.id });
-    res.send({
-      message: "¡Idioma eliminado correctamente!",
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Idioma no encontrado.");
+    await prisma().delete({ where: { id: req.params.id } });
+    res.send({ message: "¡Idioma eliminado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteManyLanguage = async (req, res) => {
   try {
-    await Language.deleteMany({ _id: req.body.ids });
-    res.send({
-      message: `¡Idioma eliminado correctamente!`,
-    });
+    await prisma().deleteMany({ where: { id: { in: uuidList(req.body.ids) } } });
+    res.send({ message: "¡Idioma eliminado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 

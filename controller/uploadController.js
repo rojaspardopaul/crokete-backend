@@ -1,9 +1,9 @@
 /**
  * Upload controller — centralized image uploads for the admin panel.
- * Receives a data-URI, normalizes via Cloudinary (webp + uniform size) and
- * returns the final URL. Images are processed/stored by Cloudinary only.
+ * Receives a data-URI, normalizes it (webp + uniform size) and returns the
+ * final URL. Images are processed with sharp and stored in Supabase Storage.
  */
-const { uploadImage } = require("../lib/cloudinary/uploader");
+const { uploadImage } = require("../lib/storage/uploader");
 
 const ALLOWED = /^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml);base64,/i;
 

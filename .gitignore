@@ -137,3 +137,12 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Prisma Client generado (se recrea con `npx prisma generate`)
+/src/generated/prisma
+
+# Skills de agentes que instala `prisma init` — herramientas locales, no código
+/.agents/
+/.claude/skills/
+/.windsurf/
+/skills-lock.json

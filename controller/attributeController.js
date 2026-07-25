@@ -1,415 +1,284 @@
-const Attribute = require("../models/Attribute");
+const { getPrisma } = require("../lib/prisma");
+const { attributeToApi, toApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
 const { handleProductAttribute } = require("../lib/stock-controller/others");
+
+const attributes = () => getPrisma().attribute;
+const values = () => getPrisma().attributeValue;
+
+/** Los valores del atributo viajan como `variants` en la API heredada. */
+const WITH_VALUES = { values: { orderBy: { createdAt: "asc" } } };
+
+function toRow(body) {
+  const row = {};
+  if (body.title !== undefined) row.title = body.title;
+  if (body.name !== undefined) row.name = body.name;
+  if (body.option !== undefined) row.option = body.option;
+  if (body.type !== undefined) row.type = body.type;
+  if (body.status !== undefined) row.status = body.status;
+  return row;
+}
 
 const addAttribute = async (req, res) => {
   try {
-    const newAttribute = new Attribute(req.body);
-    await newAttribute.save();
-    res.send({
-      message: "¡Atributo agregado correctamente!",
+    const { variants = [], ...rest } = req.body;
+    await attributes().create({
+      data: {
+        ...toRow(rest),
+        values: {
+          create: variants.map((v) => ({ name: v.name, status: v.status || "show" })),
+        },
+      },
     });
+    res.send({ message: "¡Atributo agregado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: `Error al agregar el atributo: ${err.message}`,
-    });
+    res.status(500).send({ message: `Error al agregar el atributo: ${err.message}` });
   }
 };
-// add child attributes
+
 const addChildAttributes = async (req, res) => {
   try {
-    const { id } = req.params;
-    const attribute = await Attribute.findById(id);
-    await Attribute.updateOne(
-      { _id: attribute._id },
-      { $push: { variants: req.body } }
-    );
-    res.send({
-      message: "¡Valor de atributo agregado correctamente!",
+    if (!isUuid(req.params.id)) return notFound(res, "Atributo no encontrado.");
+    await values().create({
+      data: {
+        attributeId: req.params.id,
+        name: req.body.name,
+        status: req.body.status || "show",
+      },
     });
+    res.send({ message: "¡Valor de atributo agregado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const addAllAttributes = async (req, res) => {
   try {
-    await Attribute.deleteMany();
-    await Attribute.insertMany(req.body);
-    res.send({
-      message: "¡Atributos agregados correctamente!",
-    });
+    await attributes().deleteMany();
+    for (const item of req.body || []) {
+      const { variants = [], ...rest } = item;
+      await attributes().create({
+        data: {
+          ...toRow(rest),
+          values: { create: variants.map((v) => ({ name: v.name, status: v.status || "show" })) },
+        },
+      });
+    }
+    res.send({ message: "¡Atributos agregados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getAllAttributes = async (req, res) => {
   try {
     const { type, option, option1 } = req.query;
-    const attributes = await Attribute.find({
-      $or: [{ type: type }, { $or: [{ option: option }, { option: option1 }] }],
+    // Se replica el $or heredado: por tipo, o por cualquiera de las dos opciones.
+    const or = [];
+    if (type) or.push({ type });
+    if (option) or.push({ option });
+    if (option1) or.push({ option: option1 });
+
+    const rows = await attributes().findMany({
+      where: or.length ? { OR: or } : {},
+      include: WITH_VALUES,
     });
-    res.send(attributes);
+    res.send(rows.map(attributeToApi));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getShowingAttributes = async (req, res) => {
   try {
-    // console.log("getShowingAttributes");
-    const attributes = await Attribute.aggregate([
-      {
-        $match: {
-          status: "show",
-          "variants.status": "show",
-        },
-      },
-      {
-        $project: {
-          _id: 1,
-          status: 1,
-          title: 1,
-          name: 1,
-          option: 1,
-          createdAt: 1,
-          updateAt: 1,
-          variants: {
-            $filter: {
-              input: "$variants",
-              cond: {
-                $eq: ["$$this.status", "show"],
-              },
-            },
-          },
-        },
-      },
-    ]);
-    res.send(attributes);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    // Equivale a la agregación anterior ($match + $filter): atributos visibles
+    // con al menos un valor visible, devolviendo sólo esos valores.
+    const rows = await attributes().findMany({
+      where: { status: "show", values: { some: { status: "show" } } },
+      include: { values: { where: { status: "show" }, orderBy: { createdAt: "asc" } } },
     });
+    res.send(rows.map(attributeToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getShowingAttributesTest = async (req, res) => {
   try {
-    const attributes = await Attribute.find({ status: "show" });
-    res.send(attributes);
+    const rows = await attributes().findMany({ where: { status: "show" }, include: WITH_VALUES });
+    res.send(rows.map(attributeToApi));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
-// update many attribute
+
 const updateManyAttribute = async (req, res) => {
   try {
-    await Attribute.updateMany(
-      { _id: { $in: req.body.ids } },
-      {
-        $set: {
-          option: req.body.option,
-          status: req.body.status,
-        },
-      },
-      {
-        multi: true,
-      }
-    );
-
-    res.send({
-      message: "¡Atributos actualizados correctamente!",
-    });
+    const data = {};
+    if (req.body.option !== undefined) data.option = req.body.option;
+    if (req.body.status !== undefined) data.status = req.body.status;
+    await attributes().updateMany({ where: { id: { in: uuidList(req.body.ids) } }, data });
+    res.send({ message: "¡Atributos actualizados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getAttributeById = async (req, res) => {
   try {
-    const attribute = await Attribute.findById(req.params.id);
-
-    // console.log(attribute);
-
-    res.send(attribute);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Atributo no encontrado.");
+    const row = await attributes().findUnique({
+      where: { id: req.params.id },
+      include: WITH_VALUES,
     });
+    if (!row) return notFound(res, "Atributo no encontrado.");
+    res.send(attributeToApi(row));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getChildAttributeById = async (req, res) => {
   try {
-    const { id, ids } = req.params;
-
-    const attribute = await Attribute.findOne({
-      _id: id,
-    });
-
-    const childAttribute = attribute.variants.find((attr) => {
-      return attr._id == ids;
-    });
-
-    res.send(childAttribute);
+    const { ids } = req.params;
+    if (!isUuid(ids)) return notFound(res, "Valor de atributo no encontrado.");
+    const row = await values().findUnique({ where: { id: ids } });
+    if (!row) return notFound(res, "Valor de atributo no encontrado.");
+    res.send(toApi(row));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateAttributes = async (req, res) => {
   try {
-    const attribute = await Attribute.findById(req.params.id);
-    if (attribute) {
-      attribute.title = { ...attribute.title, ...req.body.title };
-      attribute.name = { ...attribute.name, ...req.body.name };
-      attribute._id = req.params.id;
-      //attribute.title = req.body.title;
-      // attribute.name = req.body.name;
-      attribute.option = req.body.option;
-      attribute.type = req.body.type;
-      // attribute.variants = req.body.variants;
+    if (!isUuid(req.params.id)) return notFound(res, "Atributo no encontrado.");
+    const current = await attributes().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "Atributo no encontrado.");
+
+    const data = toRow(req.body);
+    if (req.body.title !== undefined) {
+      data.title = { ...(current.title || {}), ...(req.body.title || {}) };
     }
-    await attribute.save();
-    res.send({
-      message: "¡Atributo actualizado correctamente!",
-    });
+    if (req.body.name !== undefined) {
+      data.name = { ...(current.name || {}), ...(req.body.name || {}) };
+    }
+
+    await attributes().update({ where: { id: req.params.id }, data });
+    res.send({ message: "¡Atributo actualizado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// update child attributes
 const updateChildAttributes = async (req, res) => {
   try {
-    const { attributeId, childId } = req.params;
+    const { childId } = req.params;
+    if (!isUuid(childId)) return notFound(res, "Valor de atributo no encontrado.");
 
-    let attribute = await Attribute.findOne({
-      _id: attributeId,
-      "variants._id": childId,
+    const current = await values().findUnique({ where: { id: childId } });
+    if (!current) return notFound(res, "Valor de atributo no encontrado.");
+
+    await values().update({
+      where: { id: childId },
+      data: {
+        name: { ...(current.name || {}), ...(req.body.name || {}) },
+        ...(req.body.status !== undefined ? { status: req.body.status } : {}),
+      },
     });
-
-    if (attribute) {
-      const att = attribute.variants.find((v) => v._id.toString() === childId);
-
-      const name = {
-        ...att.name,
-        ...req.body.name,
-      };
-
-      await Attribute.updateOne(
-        { _id: attributeId, "variants._id": childId },
-        {
-          $set: {
-            "variants.$.name": name,
-            "variants.$.status": req.body.status,
-          },
-        }
-      );
-    }
-
-    res.send({
-      message: "¡Valor de atributo actualizado correctamente!",
-    });
+    res.send({ message: "¡Valor de atributo actualizado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-// update many attribute
 const updateManyChildAttribute = async (req, res) => {
   try {
-    // select attribute value
-    const childIdAttribute = await Attribute.findById(req.body.currentId);
-
-    const final = childIdAttribute.variants.filter((value) =>
-      req.body.ids.find((value1) => value1 == value._id)
-    );
-
-    const updateStatusAttribute = final.map((value) => {
-      value.status = req.body.status;
-      return value;
-    });
-
-    // group attribute
-    let totalVariants = [];
-    if (req.body.changeId) {
-      const groupIdAttribute = await Attribute.findById(req.body.changeId);
-      totalVariants = [...groupIdAttribute.variants, ...updateStatusAttribute];
+    const ids = uuidList(req.body.ids);
+    if (ids.length === 0) {
+      return res.send({ message: "¡Valores de atributo actualizados correctamente!" });
     }
 
-    if (totalVariants.length === 0) {
-      await Attribute.updateOne(
-        { _id: req.body.currentId },
-        {
-          $set: {
-            variants: childIdAttribute.variants,
-          },
-        },
-        {
-          multi: true,
-        }
-      );
-    } else {
-      await Attribute.updateOne(
-        { _id: req.body.changeId },
-        {
-          $set: {
-            variants: totalVariants,
-          },
-        },
-        {
-          multi: true,
-        }
-      );
+    // Con los valores en su propia tabla, "mover a otro atributo" es reasignar
+    // la clave foránea; antes había que copiar el subdocumento y hacer $pull.
+    const data = {};
+    if (req.body.status !== undefined) data.status = req.body.status;
+    if (req.body.changeId && isUuid(req.body.changeId)) data.attributeId = req.body.changeId;
 
-      await Attribute.updateOne(
-        { _id: req.body.currentId },
-        {
-          $pull: { variants: { _id: req.body.ids } },
-        },
-        {
-          multi: true,
-        }
-      );
-    }
-
-    res.send({
-      message: "¡Valores de atributo actualizados correctamente!",
-    });
+    await values().updateMany({ where: { id: { in: ids } }, data });
+    res.send({ message: "¡Valores de atributo actualizados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateStatus = async (req, res) => {
   try {
-    const newStatus = req.body.status;
-    await Attribute.updateOne(
-      { _id: req.params.id },
-      {
-        $set: {
-          status: newStatus,
-        },
-      }
-    );
+    if (!isUuid(req.params.id)) return notFound(res, "Atributo no encontrado.");
+    const status = req.body.status;
+    await attributes().update({ where: { id: req.params.id }, data: { status } });
     res.status(200).send({
-      message: `Atributo ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
+      message: `Atributo ${status === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateChildStatus = async (req, res) => {
   try {
-    const newStatus = req.body.status;
-
-    await Attribute.updateOne(
-      { "variants._id": req.params.id },
-      {
-        $set: {
-          "variants.$.status": newStatus,
-        },
-      }
-    );
+    if (!isUuid(req.params.id)) return notFound(res, "Valor de atributo no encontrado.");
+    const status = req.body.status;
+    await values().update({ where: { id: req.params.id }, data: { status } });
     res.status(200).send({
-      message: `Valor de atributo ${newStatus === "show" ? "publicado" : "ocultado"} correctamente!`,
+      message: `Valor de atributo ${status === "show" ? "publicado" : "ocultado"} correctamente!`,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteAttribute = async (req, res) => {
   try {
-    await Attribute.deleteOne({ _id: req.params.id });
-    res.send({
-      message: "¡Atributo eliminado correctamente!",
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Atributo no encontrado.");
+    // Los valores caen por ON DELETE CASCADE.
+    await attributes().delete({ where: { id: req.params.id } });
+    res.send({ message: "¡Atributo eliminado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
-// delete child attribute
+
 const deleteChildAttribute = async (req, res) => {
   try {
     const { attributeId, childId } = req.params;
+    if (!isUuid(childId)) return notFound(res, "Valor de atributo no encontrado.");
 
-    await Attribute.updateOne(
-      { _id: attributeId },
-      { $pull: { variants: { _id: childId } } }
-    );
-
+    await values().delete({ where: { id: childId } });
     await handleProductAttribute(attributeId, childId);
-    res.send({
-      message: "¡Valor de atributo eliminado correctamente!",
-    });
+    res.send({ message: "¡Valor de atributo eliminado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteManyAttribute = async (req, res) => {
   try {
-    await Attribute.deleteMany({ _id: req.body.ids });
-    // console.log('delete many attribute');
-    res.send({
-      message: `¡Atributos eliminados correctamente!`,
-    });
+    await attributes().deleteMany({ where: { id: { in: uuidList(req.body.ids) } } });
+    res.send({ message: "¡Atributos eliminados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteManyChildAttribute = async (req, res) => {
   try {
-    await Attribute.updateOne(
-      { _id: req.body.id },
-      {
-        $pull: { variants: { _id: req.body.ids } },
-      },
-      {
-        multi: true,
-      }
-    );
-
-    await handleProductAttribute(req.body.id, req.body.ids, "multi");
-    res.send({
-      message: `¡Valores de atributo eliminados correctamente!`,
-    });
+    const ids = uuidList(req.body.ids);
+    await values().deleteMany({ where: { id: { in: ids } } });
+    await handleProductAttribute(req.body.id, ids, "multi");
+    res.send({ message: "¡Valores de atributo eliminados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 

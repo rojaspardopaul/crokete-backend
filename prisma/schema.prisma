@@ -1,0 +1,1083 @@
+// Crokete — esquema PostgreSQL (Supabase).
+//
+// Migrado desde los 24 modelos Mongoose de models/. Criterios aplicados:
+//
+//   * Textos multi-idioma (title/name/description…) → Json (jsonb) con claves de
+//     locale, p. ej. { "es": "Pienso", "en": "Dog Food" }. Se validan en la capa
+//     de aplicación con zod; no se normalizan a tablas por idioma para poder
+//     añadir locales sin migración de esquema.
+//   * Contenido de solo despliegue (fichas, tablas nutricionales, specs) → Json.
+//     No se filtra ni agrega por estos campos, así que normalizarlos no aporta.
+//   * Lo que sí se consulta, filtra o agrega → columnas tipadas e indexadas.
+//   * Dinero → Decimal(10,2). En Mongo eran floats (y algunos strings), lo que
+//     arrastraba errores de redondeo.
+//   * Los arrays sin esquema de Mongo (Product.variants, Order.cart) pasan a
+//     tablas hijas con FK. El payload original del carrito se conserva en
+//     OrderItem.snapshot porque es un histórico inmutable de la compra.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// show/hide — visibilidad pública, usado por casi todo el catálogo.
+enum Visibility {
+  show
+  hide
+}
+
+enum ProductType {
+  food
+  medicine
+  accessory
+  general
+}
+
+enum PetTypeTag {
+  dog
+  cat
+  both
+}
+
+enum AgeRange {
+  puppy
+  adult
+  senior
+  all
+}
+
+enum PetSize {
+  mini
+  small
+  medium
+  large
+  giant
+  all
+}
+
+enum SpecialNeed {
+  sensitive_stomach
+  weight_control
+  urinary
+  dental
+  skin_coat
+  joint
+  hypoallergenic
+}
+
+/// Peso (kg/g/mg/lb/oz), volumen (l/ml) o conteo (pieza). Base del cálculo de
+/// precio por unidad.
+enum PackageUnit {
+  kg
+  g
+  mg
+  l
+  ml
+  lb
+  oz
+  pieza
+}
+
+enum VisualTag {
+  new
+  bestseller
+  organic
+  grain_free
+  prescription
+  eco
+  limited_edition
+  vet_recommended
+  sale
+}
+
+enum IconTag {
+  grain_free
+  high_protein
+  vet_recommended
+  natural
+  hypoallergenic
+  low_fat
+  organic
+  no_artificial
+  prebiotics
+  omega_3_6
+  gluten_free
+  sugar_free
+  sensitive_stomach
+  joint_support
+  skin_coat
+  dental_care
+  weight_control
+  puppy_formula
+  pregnant_dog
+  newborn_puppy
+}
+
+enum OrderStatus {
+  pedido
+  empaquetado
+  en_reparto
+  entregado
+  cancelado
+}
+
+enum AdminRole {
+  admin
+  super_admin
+  cashier
+  manager
+  ceo
+  driver
+  security_guard
+  accountant
+}
+
+enum AdminStatus {
+  activo
+  inactivo
+}
+
+enum LoyaltyTier {
+  nuevo
+  frecuente
+  vip
+}
+
+enum AttributeOption {
+  dropdown
+  radio
+  checkbox
+}
+
+enum AttributeKind {
+  attribute
+  extra
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+enum AiSuggestedAction {
+  approved_suggestion
+  needs_review
+  spam
+  offensive
+  fake_review
+}
+
+enum PetSpecies {
+  perro
+  gato
+  otro
+}
+
+enum PetGender {
+  macho
+  hembra
+}
+
+enum ActiveStatus {
+  active
+  inactive
+}
+
+enum VetAppointmentStatus {
+  requested
+  approved
+  confirmed
+  in_progress
+  completed
+  rejected
+  cancelled
+  no_show
+}
+
+enum MeetingPlatform {
+  google_meet
+  jitsi
+}
+
+enum CancelledBy {
+  customer
+  admin
+  vet
+}
+
+enum AuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  CREATE_ADMIN
+  UPDATE_ADMIN
+  DELETE_ADMIN
+  UPDATE_STATUS
+  UPDATE_ROLE
+  UPDATE_PROFILE
+  PASSWORD_RESET
+  PASSWORD_CHANGE
+}
+
+enum AuditStatus {
+  success
+  failure
+}
+
+enum PaymentEvent {
+  PAYMENT_INTENT_CREATED
+  PAYMENT_INTENT_UPDATED
+  PAYMENT_SUCCEEDED
+  PAYMENT_FAILED
+  ORDER_CREATED
+  ORDER_CREATION_FAILED
+  WEBHOOK_RECEIVED
+  REFUND_INITIATED
+}
+
+enum PaymentLogStatus {
+  success
+  error
+  pending
+}
+
+enum PointTransactionType {
+  earned
+  redeemed
+  expired
+  adjusted
+  milestone_bonus
+}
+
+enum LoyaltyRewardType {
+  milestone
+  points_redemption
+}
+
+enum DiscountKind {
+  percentage
+  fixed
+}
+
+enum NotificationStatus {
+  read
+  unread
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catálogo
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Category {
+  id          String     @id @default(uuid()) @db.Uuid
+  /// { "es": "...", "en": "..." }
+  name        Json
+  description Json?
+  slug        String?
+  icon        String?
+  status      Visibility @default(show)
+
+  /// Jerarquía padre/hijo. En Mongo era un parentId String suelto sin
+  /// integridad referencial; aquí es una FK real.
+  parentId String?    @db.Uuid
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+
+  /// Categoría principal del producto (Product.category).
+  products         Product[]         @relation("ProductPrimaryCategory")
+  /// Todas las categorías del producto (Product.categories).
+  productsIncluded ProductCategory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slug])
+  @@index([parentId])
+  @@index([status])
+  @@map("categories")
+}
+
+model Brand {
+  id     String     @id @default(uuid()) @db.Uuid
+  name   Json
+  image  String?
+  status Visibility @default(show)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("brands")
+}
+
+/// Especie destino del catálogo (perro/gato). No confundir con CustomerPet, que
+/// es la mascota concreta de un cliente.
+model Pet {
+  id     String     @id @default(uuid()) @db.Uuid
+  name   Json
+  icon   String?
+  status Visibility @default(show)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("pets")
+}
+
+model Product {
+  id          String  @id @default(uuid()) @db.Uuid
+  /// SKU interno editable por el admin (Mongo: productId).
+  refCode     String?
+  sku         String?
+  barcode     String?
+  title       Json
+  description Json?
+  slug        String
+
+  categoryId String   @db.Uuid
+  category   Category @relation("ProductPrimaryCategory", fields: [categoryId], references: [id])
+
+  /// Relación N:M explícita (Mongo: categories[]).
+  categories ProductCategory[]
+
+  petId String? @db.Uuid
+  pet   Pet?    @relation(fields: [petId], references: [id], onDelete: SetNull)
+
+  brandId String? @db.Uuid
+  brand   Brand?  @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  /// URLs de imagen en orden de despliegue.
+  image String[]
+  tag   String[]
+
+  stock Int @default(0)
+  sales Int @default(0)
+
+  originalPrice Decimal  @db.Decimal(10, 2)
+  price         Decimal  @db.Decimal(10, 2)
+  discount      Decimal? @db.Decimal(10, 2)
+
+  isCombination Boolean     @default(false)
+  status        Visibility  @default(show)
+  productType   ProductType @default(general)
+
+  averageRating Decimal @default(0) @db.Decimal(3, 2)
+  totalReviews  Int     @default(0)
+
+  // ── Compatibilidad con mascota (aplanado: se filtra por estos campos) ──
+  petCompatPetType      PetTypeTag[]
+  petCompatAgeRange     AgeRange[]
+  petCompatSize         PetSize[]
+  petCompatBreed        String[]
+  petCompatSpecialNeeds SpecialNeed[]
+
+  // ── Empaque (base del precio por unidad, es cálculo real) ──
+  packageWeight   Decimal?     @db.Decimal(10, 3)
+  packageUnit     PackageUnit?
+  packageServings Int?
+
+  /// Texto corto above-the-fold: { pet, age, size, weightRange, highlight }.
+  quickInfo Json?
+
+  // ── Contenido enriquecido multi-idioma (solo despliegue) ──
+  benefits       Json?
+  features       Json?
+  ingredients    Json?
+  feedingGuide   Json?
+  indications    Json?
+  warnings       Json?
+  dosage         Json?
+  recommendedFor Json?
+  brandInfo      Json?
+
+  /// { guaranteedAnalysis: [{nutrient,value,unit}], calories, caloriesPerKg }
+  nutritionTable   Json?
+  /// [{ key: {locale}, value: {locale} }] — specs de accesorios.
+  technicalSpecs   Json?
+  /// [{ petWeight, dailyAmount, durationDays }] — solo alimento.
+  consumptionGuide Json?
+  /// [{ label, value }] — píldoras de resumen.
+  keyFacts         Json?
+
+  productHighlights String[]
+  visualTags        VisualTag[]
+  iconTags          IconTag[]
+
+  variants      ProductVariant[]
+  reviews       Review[]
+  orderItems    OrderItem[]
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slug])
+  @@index([status, sales(sort: Desc)])
+  @@index([status, price])
+  @@index([productType, status])
+  @@index([categoryId, status])
+  @@index([brandId])
+  @@index([petId])
+  @@map("products")
+}
+
+/// Tabla puente Product↔Category (Mongo: Product.categories[]).
+model ProductCategory {
+  productId  String   @db.Uuid
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  categoryId String   @db.Uuid
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@index([categoryId])
+  @@map("product_categories")
+}
+
+/// Combinación concreta de un producto (talla/color/…). En Mongo era
+/// `variants: [{}]` sin esquema, donde las claves dinámicas eran IDs de
+/// Attribute. Esas claves dinámicas siguen en `attributes` (jsonb) porque son
+/// abiertas por diseño; el resto pasa a columnas tipadas e indexables.
+model ProductVariant {
+  id        String  @id @default(uuid()) @db.Uuid
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// { "<attributeId>": "<attributeVariantId>", ... }
+  attributes Json @default("{}")
+
+  sku     String?
+  barcode String?
+  /// Identificador compuesto que usa el front (p. ej. "<productId>-0").
+  refCode String?
+  image   String?
+
+  originalPrice Decimal  @db.Decimal(10, 2)
+  price         Decimal  @db.Decimal(10, 2)
+  discount      Decimal? @db.Decimal(10, 2)
+  quantity      Int      @default(0)
+
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+/// Atributo configurable (color, talla…) con sus valores posibles.
+model Attribute {
+  id     String          @id @default(uuid()) @db.Uuid
+  title  Json
+  name   Json
+  option AttributeOption @default(radio)
+  type   AttributeKind   @default(attribute)
+  status Visibility      @default(show)
+
+  values AttributeValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("attributes")
+}
+
+/// Valor de un atributo (Mongo: Attribute.variants[]).
+model AttributeValue {
+  id          String     @id @default(uuid()) @db.Uuid
+  attributeId String     @db.Uuid
+  attribute   Attribute  @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  name        Json?
+  status      Visibility @default(show)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([attributeId])
+  @@map("attribute_values")
+}
+
+model Coupon {
+  id            String     @id @default(uuid()) @db.Uuid
+  title         Json
+  logo          String?
+  couponCode    String
+  startTime     DateTime?
+  endTime       DateTime
+  /// { type: "percentage"|"fixed", value: number }
+  discountType  Json?
+  minimumAmount Decimal    @db.Decimal(10, 2)
+  productType   String?
+  status        Visibility @default(show)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([couponCode])
+  @@index([status, endTime])
+  @@map("coupons")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clientes y pedidos
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String
+  email    String
+  phone    String?
+  password String?
+  image    String?
+  address  String?
+  country  String?
+  city     String?
+
+  /// Dirección de envío por defecto (1:1, embebida en Mongo).
+  shippingAddress Json?
+
+  // ── Lealtad (agregados desnormalizados; el detalle vive en PointTransaction) ──
+  loyaltyPoints      Int         @default(0)
+  loyaltyTotalPoints Int         @default(0)
+  loyaltyTotalSpent  Decimal     @default(0) @db.Decimal(12, 2)
+  loyaltyOrderCount  Int         @default(0)
+  loyaltyTier        LoyaltyTier @default(nuevo)
+  loyaltyJoinedAt    DateTime    @default(now())
+
+  orders            Order[]
+  reviews           Review[]
+  pets              CustomerPet[]
+  pointTransactions PointTransaction[]
+  loyaltyRewards    LoyaltyReward[]
+  vetAppointments   VetAppointment[]
+  paymentLogs       PaymentLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email])
+  @@map("customers")
+}
+
+model Order {
+  id      String @id @default(uuid()) @db.Uuid
+  /// Folio secuencial visible (Mongo: mongoose-sequence → aquí, secuencia nativa).
+  invoice Int    @unique @default(autoincrement())
+
+  customerId String   @db.Uuid
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  items OrderItem[]
+
+  /// Datos de contacto/envío congelados al momento de la compra.
+  userInfo Json
+
+  subTotal     Decimal @db.Decimal(10, 2)
+  shippingCost Decimal @db.Decimal(10, 2)
+  discount     Decimal @default(0) @db.Decimal(10, 2)
+  /// IVA: México 16 %. El precio ya lo incluye; taxAmount es el monto extraído.
+  taxRate      Decimal @default(16) @db.Decimal(5, 2)
+  taxAmount    Decimal @default(0) @db.Decimal(10, 2)
+  total        Decimal @db.Decimal(10, 2)
+
+  shippingOption        String?
+  paymentMethod         String
+  /// Único (parcial): evita pedidos duplicados por el mismo PaymentIntent.
+  stripePaymentIntentId String?
+  loyaltyCouponCode     String?
+  /// Últimos 4, marca, etc. Nunca el número completo.
+  cardInfo              Json?
+
+  status OrderStatus @default(pedido)
+
+  notifications     Notification[]
+  paymentLogs       PaymentLog[]
+  pointTransactions PointTransaction[]
+  loyaltyRewards    LoyaltyReward[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([stripePaymentIntentId])
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("orders")
+}
+
+/// Línea de pedido. Reemplaza `Order.cart: [{}]`, que en Mongo guardaba el
+/// documento completo del producto por ítem. Los campos que se consultan y
+/// agregan (título, precio, cantidad) son columnas; el documento original se
+/// conserva íntegro en `snapshot` por ser un histórico legal de la compra.
+model OrderItem {
+  id      String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Se pone a NULL si el producto se elimina: el pedido conserva su histórico.
+  productId String?  @db.Uuid
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  variantId String?         @db.Uuid
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  /// Valores congelados al momento de la compra.
+  title     String
+  image     String?
+  sku       String?
+  price     Decimal @db.Decimal(10, 2)
+  quantity  Int
+  itemTotal Decimal @db.Decimal(10, 2)
+
+  /// Payload original del ítem del carrito, tal cual se compró.
+  snapshot Json?
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reseñas
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(uuid()) @db.Uuid
+  productId  String   @db.Uuid
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String   @db.Uuid
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  rating      Int
+  title       String       @default("")
+  comment     String
+  displayName String       @default("")
+  images      String[]
+  status      ReviewStatus @default(pending)
+
+  /// { confidence, suggestedAction, reason, tags[] } — moderación asistida.
+  aiAnalysis        Json?
+  aiSuggestedAction AiSuggestedAction?
+  adminNote         String             @default("")
+  helpfulVotes      Int                @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, customerId])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([productId, status])
+  @@map("reviews")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lealtad
+// ─────────────────────────────────────────────────────────────────────────────
+
+model LoyaltyConfig {
+  id String @id @default(uuid()) @db.Uuid
+
+  pointsPerDollar  Decimal @default(1) @db.Decimal(10, 2)
+  /// Valor en MXN de cada punto al canjear.
+  pointValue       Decimal @default(0.1) @db.Decimal(10, 4)
+  pointsExpireDays Int     @default(365)
+  minRedeemPoints  Int     @default(100)
+  /// Tope del pedido pagable con puntos.
+  maxRedeemPercent Int     @default(50)
+
+  /// [{ orderCount, discountPercent, label }]
+  milestones Json @default("[]")
+
+  tierThresholdFrecuente Int @default(3)
+  tierThresholdVip       Int @default(10)
+
+  enabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("loyalty_configs")
+}
+
+model PointTransaction {
+  id          String               @id @default(uuid()) @db.Uuid
+  customerId  String               @db.Uuid
+  customer    Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type        PointTransactionType
+  /// Positivo al ganar; negativo al canjear o expirar.
+  points      Int
+  /// Saldo resultante tras el movimiento.
+  balance     Int
+  description String
+
+  orderId String? @db.Uuid
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  couponGenerated String?
+  expiresAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("point_transactions")
+}
+
+model LoyaltyReward {
+  id         String            @id @default(uuid()) @db.Uuid
+  customerId String            @db.Uuid
+  customer   Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       LoyaltyRewardType
+
+  couponCode    String
+  discountType  DiscountKind
+  discountValue Decimal      @db.Decimal(10, 2)
+  minimumAmount Decimal      @default(0) @db.Decimal(10, 2)
+
+  used   Boolean   @default(false)
+  usedAt DateTime?
+
+  orderId String? @db.Uuid
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  expiresAt   DateTime
+  description String
+  /// Solo para type = points_redemption.
+  pointsSpent Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([couponCode])
+  @@index([customerId, used])
+  @@map("loyalty_rewards")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Veterinaria
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mascota concreta de un cliente (≠ Pet, que es la especie del catálogo).
+model CustomerPet {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @db.Uuid
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  name    String
+  species PetSpecies
+  breed   String       @default("")
+  /// En meses.
+  age     Int?
+  /// En kg.
+  weight  Decimal?     @db.Decimal(6, 2)
+  gender  PetGender?
+  image   String?
+  /// Alergias, condiciones, etc.
+  notes   String       @default("")
+  status  ActiveStatus @default(active)
+
+  appointments VetAppointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId, status])
+  @@map("customer_pets")
+}
+
+model Veterinarian {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  email         String
+  phone         String?
+  specialties   String[]
+  image         String?
+  bio           String       @default("")
+  /// Cédula profesional.
+  licenseNumber String?
+  /// [{ dayOfWeek, start, end }] — sobreescribe el horario global.
+  availability  Json         @default("[]")
+  status        ActiveStatus @default(active)
+
+  appointments VetAppointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("veterinarians")
+}
+
+model VetAppointment {
+  id String @id @default(uuid()) @db.Uuid
+
+  customerId String   @db.Uuid
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  veterinarianId String       @db.Uuid
+  veterinarian   Veterinarian @relation(fields: [veterinarianId], references: [id])
+
+  customerPetId String      @db.Uuid
+  customerPet   CustomerPet @relation(fields: [customerPetId], references: [id])
+
+  date     DateTime
+  /// En minutos.
+  duration Int
+
+  reason   String
+  symptoms String[]
+
+  originalPrice   Decimal @db.Decimal(10, 2)
+  discountPercent Int     @default(0)
+  finalPrice      Decimal @db.Decimal(10, 2)
+
+  status VetAppointmentStatus @default(requested)
+
+  meetingUrl      String          @default("")
+  meetingPlatform MeetingPlatform @default(jitsi)
+
+  adminNotes      String @default("")
+  clinicalNotes   String @default("")
+  diagnosis       String @default("")
+  recommendations String @default("")
+
+  cancelledBy        CancelledBy?
+  cancellationReason String       @default("")
+
+  /// [{ status, changedAt, changedBy, note }] — bitácora append-only.
+  statusHistory Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date, veterinarianId])
+  @@index([customerId, status])
+  @@index([status, date])
+  @@map("vet_appointments")
+}
+
+model VetConfig {
+  id      String  @id @default(uuid()) @db.Uuid
+  enabled Boolean @default(false)
+
+  /// [{ minutes, label, price }]
+  durations     Json @default("[]")
+  /// [{ minSpent, discountPercent, label }]
+  discountTiers Json @default("[]")
+
+  /// 0 = sin consultas gratuitas.
+  freeThreshold        Decimal         @default(0) @db.Decimal(10, 2)
+  advanceBookingDays   Int             @default(30)
+  minBookingHoursAhead Int             @default(24)
+  videoPlatform        MeetingPlatform @default(jitsi)
+
+  workingHoursStart String @default("09:00")
+  workingHoursEnd   String @default("18:00")
+  /// 0 = domingo … 6 = sábado.
+  workingDays       Int[]  @default([1, 2, 3, 4, 5])
+
+  cancellationHoursLimit Int    @default(12)
+  maxDailyConsultations  Int    @default(20)
+  customerInstructions   String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vet_configs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Administración, seguridad y configuración
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Admin {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        Json
+  email       String
+  phone       String?
+  password    String
+  image       String?
+  address     String?
+  country     String?
+  city        String?
+  status      AdminStatus @default(activo)
+  role        AdminRole   @default(admin)
+  /// Rutas del panel permitidas para este rol.
+  accessList  String[]
+  joiningDate DateTime?
+
+  auditLogs       AuditLog[]     @relation("AuditActor")
+  auditLogsTarget AuditLog[]     @relation("AuditTarget")
+  notifications   Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email])
+  @@map("admins")
+}
+
+model AuditLog {
+  id         String @id @default(uuid()) @db.Uuid
+  adminId    String @db.Uuid
+  admin      Admin  @relation("AuditActor", fields: [adminId], references: [id], onDelete: Cascade)
+  /// Copia del email/nombre al momento del evento: el registro debe sobrevivir
+  /// aunque el admin cambie de datos o se elimine.
+  adminEmail String
+  adminName  String
+
+  action AuditAction
+
+  targetId    String? @db.Uuid
+  target      Admin?  @relation("AuditTarget", fields: [targetId], references: [id], onDelete: SetNull)
+  targetEmail String?
+  targetRole  String?
+
+  /// Diff de la mutación.
+  changes Json?
+
+  ip           String
+  userAgent    String?
+  status       AuditStatus @default(success)
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([adminId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([targetId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+/// Control de fuerza bruta por email+IP.
+model LoginAttempt {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String
+  ip           String
+  attempts     Int       @default(1)
+  blockedUntil DateTime?
+  lastAttempt  DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, ip])
+  @@index([blockedUntil])
+  @@index([lastAttempt])
+  @@map("login_attempts")
+}
+
+model PaymentLog {
+  id      String  @id @default(uuid()) @db.Uuid
+  orderId String? @db.Uuid
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  customerId String?   @db.Uuid
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  userEmail  String?
+
+  event                 PaymentEvent
+  stripePaymentIntentId String?
+  amount                Decimal?         @db.Decimal(10, 2)
+  currency              String           @default("mxn")
+  status                PaymentLogStatus @default(pending)
+  errorMessage          String?
+  /// Payload del proveedor, heterogéneo por diseño.
+  metadata              Json?
+  ip                    String?
+  userAgent             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([event, createdAt(sort: Desc)])
+  @@index([stripePaymentIntentId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("payment_logs")
+}
+
+model Notification {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String? @db.Uuid
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String?  @db.Uuid
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  adminId String? @db.Uuid
+  admin   Admin?  @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  message String
+  image   String?
+  status  NotificationStatus @default(unread)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+/// Configuración editable en caliente desde el panel (storeSetting,
+/// globalSetting, storeCustomizationSetting). El shape lo define el admin, así
+/// que se guarda como jsonb.
+model Setting {
+  id      String @id @default(uuid()) @db.Uuid
+  name    String
+  setting Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name])
+  @@map("settings")
+}
+
+model Currency {
+  id                String     @id @default(uuid()) @db.Uuid
+  name              String
+  symbol            String?
+  status            Visibility @default(show)
+  liveExchangeRates Visibility @default(show)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("currencies")
+}
+
+model Language {
+  id     String     @id @default(uuid()) @db.Uuid
+  name   String
+  /// ISO: "es", "en"…
+  code   String
+  flag   String?
+  status Visibility @default(show)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([code])
+  @@map("languages")
+}

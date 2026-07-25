@@ -1,253 +1,396 @@
-const Product = require("../models/Product");
-const mongoose = require("mongoose");
-const Category = require("../models/Category");
-const Brand = require("../models/Brand");
-const Review = require("../models/Review");
-const { languageCodes } = require("../utils/data");
-const escapeRegex = require("../utils/escapeRegex");
+const { getPrisma } = require("../lib/prisma");
+const { productToApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
 const cache = require("../utils/cache");
-const { invalidateProducts, invalidateProductBySlug, invalidateAll } = require("../lib/cache/invalidation");
+const {
+  invalidateProducts,
+  invalidateProductBySlug,
+  invalidateAll,
+} = require("../lib/cache/invalidation");
 const { findDescendantCategoryIds } = require("../utils/categoryHierarchy");
+
+const prisma = () => getPrisma();
+const products = () => getPrisma().product;
+
+/** Relaciones que la API heredada devolvía vía populate. */
+const FULL_INCLUDE = {
+  category: { select: { id: true, name: true } },
+  pet: { select: { id: true, name: true } },
+  brand: { select: { id: true, name: true } },
+  variants: true,
+  categories: { include: { category: { select: { id: true, name: true } } } },
+};
+
+const ENUM_ARRAY_FIELDS = [
+  "petCompatPetType",
+  "petCompatAgeRange",
+  "petCompatSize",
+  "petCompatSpecialNeeds",
+  "visualTags",
+  "iconTags",
+];
+
+function toNumber(value, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const n = typeof value === "number" ? value : parseFloat(String(value));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Cuerpo de la API → columnas. Deshace el anidamiento que el front sigue
+ * enviando (`prices`, `petCompatibility`, `packageInfo`) y descarta las
+ * relaciones, que se tratan aparte.
+ */
+function toRow(body) {
+  const row = {};
+  const set = (key, value) => {
+    if (value !== undefined) row[key] = value;
+  };
+
+  set("title", body.title);
+  set("description", body.description);
+  set("slug", body.slug);
+  set("sku", body.sku);
+  set("barcode", body.barcode);
+  set("refCode", body.productId);
+  set("image", body.image);
+  set("tag", body.tag);
+  set("status", body.status);
+  set("productType", body.productType);
+  set("quickInfo", body.quickInfo);
+  set("nutritionTable", body.nutritionTable);
+  set("technicalSpecs", body.technicalSpecs);
+  set("consumptionGuide", body.consumptionGuide);
+  set("keyFacts", body.keyFacts);
+  set("productHighlights", body.productHighlights);
+  set("benefits", body.benefits);
+  set("features", body.features);
+  set("ingredients", body.ingredients);
+  set("feedingGuide", body.feedingGuide);
+  set("indications", body.indications);
+  set("warnings", body.warnings);
+  set("dosage", body.dosage);
+  set("recommendedFor", body.recommendedFor);
+  set("brandInfo", body.brandInfo);
+
+  if (body.stock !== undefined) row.stock = Math.trunc(toNumber(body.stock, 0));
+  if (body.sales !== undefined) row.sales = Math.trunc(toNumber(body.sales, 0));
+  if (body.isCombination !== undefined) row.isCombination = !!body.isCombination;
+
+  if (body.prices) {
+    if (body.prices.originalPrice !== undefined) {
+      row.originalPrice = toNumber(body.prices.originalPrice, 0);
+    }
+    if (body.prices.price !== undefined) row.price = toNumber(body.prices.price, 0);
+    if (body.prices.discount !== undefined) row.discount = toNumber(body.prices.discount, 0);
+  }
+
+  if (body.petCompatibility) {
+    const pc = body.petCompatibility;
+    if (pc.petType !== undefined) row.petCompatPetType = pc.petType || [];
+    if (pc.ageRange !== undefined) row.petCompatAgeRange = pc.ageRange || [];
+    if (pc.size !== undefined) row.petCompatSize = pc.size || [];
+    if (pc.breed !== undefined) row.petCompatBreed = pc.breed || [];
+    if (pc.specialNeeds !== undefined) row.petCompatSpecialNeeds = pc.specialNeeds || [];
+  }
+
+  if (body.packageInfo) {
+    const pkg = body.packageInfo;
+    if (pkg.weight !== undefined) row.packageWeight = toNumber(pkg.weight);
+    if (pkg.unit !== undefined) row.packageUnit = pkg.unit || null;
+    if (pkg.servings !== undefined) {
+      const s = toNumber(pkg.servings);
+      row.packageServings = s === null ? null : Math.trunc(s);
+    }
+  }
+
+  if (body.visualTags !== undefined) row.visualTags = body.visualTags || [];
+  if (body.iconTags !== undefined) row.iconTags = body.iconTags || [];
+
+  // Un valor fuera del enum aborta el INSERT; se descartan los desconocidos
+  // igual que Mongoose ignoraba lo que no estuviera en su enum.
+  for (const field of ENUM_ARRAY_FIELDS) {
+    if (Array.isArray(row[field])) {
+      row[field] = row[field].map(String).filter(Boolean);
+    }
+  }
+
+  return row;
+}
+
+/** Variantes de la API (claves dinámicas <attributeId>) → filas tipadas. */
+function toVariantRows(variants) {
+  const KNOWN = new Set([
+    "originalPrice", "price", "quantity", "discount",
+    "productId", "barcode", "sku", "image", "_id", "id",
+  ]);
+
+  return (variants || []).map((v) => {
+    const attributes = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (!KNOWN.has(k)) attributes[k] = val;
+    }
+    return {
+      attributes,
+      sku: v.sku || null,
+      barcode: v.barcode || null,
+      refCode: v.productId || null,
+      image: v.image || null,
+      originalPrice: toNumber(v.originalPrice, 0),
+      price: toNumber(v.price, 0),
+      discount: toNumber(v.discount, 0),
+      quantity: Math.trunc(toNumber(v.quantity, 0)),
+    };
+  });
+}
+
+/** Ids de categoría (principal + N:M) saneados. */
+function categoryIdsFrom(body) {
+  return [...new Set([...(body.categories || []), body.category].filter(Boolean).map(String))]
+    .filter(isUuid);
+}
 
 const addProduct = async (req, res) => {
   try {
-    const newProduct = new Product({
-      ...req.body,
-      // productId: cname + (count + 1),
-      productId: req.body.productId
-        ? req.body.productId
-        : new mongoose.Types.ObjectId(),
+    const row = toRow(req.body);
+    if (!isUuid(req.body.category)) {
+      return res.status(400).send({ message: "La categoría del producto no es válida." });
+    }
+    row.categoryId = req.body.category;
+    row.petId = isUuid(req.body.pet) ? req.body.pet : null;
+    row.brandId = isUuid(req.body.brand) ? req.body.brand : null;
+
+    const created = await products().create({
+      data: {
+        ...row,
+        categories: { create: categoryIdsFrom(req.body).map((id) => ({ categoryId: id })) },
+        variants: { create: toVariantRows(req.body.variants) },
+      },
+      include: FULL_INCLUDE,
     });
 
-    await newProduct.save();
     invalidateProducts();
-    res.send(newProduct);
+    res.send(productToApi(created));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const addAllProducts = async (req, res) => {
   try {
-    // console.log('product data',req.body)
-    await Product.deleteMany();
-    await Product.insertMany(req.body);
+    await products().deleteMany();
+    for (const item of req.body || []) {
+      if (!isUuid(item.category)) continue;
+      const row = toRow(item);
+      row.categoryId = item.category;
+      row.petId = isUuid(item.pet) ? item.pet : null;
+      row.brandId = isUuid(item.brand) ? item.brand : null;
+      await products().create({
+        data: {
+          ...row,
+          categories: { create: categoryIdsFrom(item).map((id) => ({ categoryId: id })) },
+          variants: { create: toVariantRows(item.variants) },
+        },
+      });
+    }
     invalidateAll();
-    res.status(200).send({
-      message: "¡Producto agregado correctamente!",
-    });
+    res.status(200).send({ message: "¡Producto agregado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getShowingProducts = async (req, res) => {
   try {
-    const products = await Product.find({ status: "show" }).sort({ _id: -1 });
-    res.send(products);
-    // console.log("products", products);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    const rows = await products().findMany({
+      where: { status: "show" },
+      include: FULL_INCLUDE,
+      orderBy: { createdAt: "desc" },
     });
+    res.send(rows.map(productToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
+/**
+ * Busca por texto en los campos multi-idioma. En Mongo eran regex por locale
+ * (`title.es`, `title.en`…); aquí se compara el jsonb completo como texto con
+ * ILIKE, que cubre todos los idiomas de una vez y sigue siendo insensible a
+ * mayúsculas. Devuelve ids para luego cargarlos con sus relaciones.
+ */
+async function searchProductIds(term) {
+  const like = `%${term}%`;
+  const rows = await prisma().$queryRaw`
+    SELECT DISTINCT p.id
+    FROM products p
+    LEFT JOIN brands b ON b.id = p."brandId"
+    LEFT JOIN categories c ON c.id = p."categoryId"
+    LEFT JOIN product_categories pc ON pc."productId" = p.id
+    LEFT JOIN categories c2 ON c2.id = pc."categoryId"
+    WHERE p.title::text ILIKE ${like}
+       OR COALESCE(p.description::text, '') ILIKE ${like}
+       OR EXISTS (SELECT 1 FROM unnest(p.tag) AS t WHERE t ILIKE ${like})
+       OR COALESCE(b.name::text, '') ILIKE ${like}
+       OR COALESCE(c.name::text, '') ILIKE ${like}
+       OR COALESCE(c2.name::text, '') ILIKE ${like}`;
+  return rows.map((r) => r.id);
+}
+
 const getAllProducts = async (req, res) => {
-  const { title, category, price, page, limit } = req.query;
-
-  // console.log("getAllProducts");
-
-  let queryObject = {};
-  let sortObject = {};
-  if (title) {
-    const safeTitle = escapeRegex(title);
-    const titleQueries = languageCodes.map((lang) => ({
-      [`title.${lang}`]: { $regex: safeTitle, $options: "i" },
-    }));
-    queryObject.$or = titleQueries;
-  }
-
-  if (price === "low") {
-    sortObject = {
-      "prices.originalPrice": 1,
-    };
-  } else if (price === "high") {
-    sortObject = {
-      "prices.originalPrice": -1,
-    };
-  } else if (price === "published") {
-    queryObject.status = "show";
-  } else if (price === "unPublished") {
-    queryObject.status = "hide";
-  } else if (price === "status-selling") {
-    queryObject.stock = { $gt: 0 };
-  } else if (price === "status-out-of-stock") {
-    queryObject.stock = { $lt: 1 };
-  } else if (price === "date-added-asc") {
-    sortObject.createdAt = 1;
-  } else if (price === "date-added-desc") {
-    sortObject.createdAt = -1;
-  } else if (price === "date-updated-asc") {
-    sortObject.updatedAt = 1;
-  } else if (price === "date-updated-desc") {
-    sortObject.updatedAt = -1;
-  } else {
-    sortObject = { _id: -1 };
-  }
-
-  // console.log('sortObject', sortObject);
-
-  let categoryFilterIds = [];
-
-  if (category) {
-    const categories = await Category.find({}).select("_id parentId").lean();
-    categoryFilterIds = findDescendantCategoryIds(categories, category);
-  }
-
-  if (categoryFilterIds.length > 0) {
-    queryObject.$and = [
-      {
-        $or: [
-          { categories: { $in: categoryFilterIds } },
-          { category: { $in: categoryFilterIds } },
-        ],
-      },
-    ];
-  }
-
-  if (queryObject.$or && queryObject.$and) {
-    queryObject.$and.unshift({ $or: queryObject.$or });
-    delete queryObject.$or;
-  }
-
-  const pages = Number(page);
-  const limits = Number(limit);
-  const skip = (pages - 1) * limits;
-
   try {
-    const totalDoc = await Product.countDocuments(queryObject);
+    const { title, category, price, page, limit } = req.query;
 
-    const products = await Product.find(queryObject)
-      .populate({ path: "category", select: "_id name" })
-      .populate({ path: "categories", select: "_id name" })
-      .sort(sortObject)
-      .skip(skip)
-      .limit(limits);
+    const where = {};
+    let orderBy = { createdAt: "desc" };
 
-    res.send({
-      products,
-      totalDoc,
-      limits,
-      pages,
-    });
+    if (title) {
+      where.id = { in: await searchProductIds(String(title)) };
+    }
+
+    if (price === "low") orderBy = { originalPrice: "asc" };
+    else if (price === "high") orderBy = { originalPrice: "desc" };
+    else if (price === "published") where.status = "show";
+    else if (price === "unPublished") where.status = "hide";
+    else if (price === "status-selling") where.stock = { gt: 0 };
+    else if (price === "status-out-of-stock") where.stock = { lt: 1 };
+    else if (price === "date-added-asc") orderBy = { createdAt: "asc" };
+    else if (price === "date-added-desc") orderBy = { createdAt: "desc" };
+    else if (price === "date-updated-asc") orderBy = { updatedAt: "asc" };
+    else if (price === "date-updated-desc") orderBy = { updatedAt: "desc" };
+
+    if (category && isUuid(String(category))) {
+      const cats = await prisma().category.findMany({ select: { id: true, parentId: true } });
+      const ids = findDescendantCategoryIds(
+        cats.map((c) => ({ _id: c.id, parentId: c.parentId })),
+        category
+      );
+      if (ids.length > 0) {
+        where.OR = [
+          { categoryId: { in: ids } },
+          { categories: { some: { categoryId: { in: ids } } } },
+        ];
+      }
+    }
+
+    const pages = Number(page) || 1;
+    const limits = Number(limit) || 0;
+    const skip = limits > 0 ? (pages - 1) * limits : undefined;
+
+    const [totalDoc, rows] = await Promise.all([
+      products().count({ where }),
+      products().findMany({
+        where,
+        include: FULL_INCLUDE,
+        orderBy,
+        ...(skip ? { skip } : {}),
+        ...(limits > 0 ? { take: limits } : {}),
+      }),
+    ]);
+
+    res.send({ products: rows.map(productToApi), totalDoc, limits, pages });
   } catch (err) {
-    // console.log("error", err);
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getProductBySlug = async (req, res) => {
   try {
     const slug = req.params.slug;
-    const cacheKey = `product:slug:${slug}`;
+    // Clave propia: `product:slug:` guarda el envoltorio de la tienda
+    // ({products, relatedProducts, …}), no una ficha suelta. Compartirla hacía
+    // que el primero en poblar el caché devolviera la forma equivocada al otro.
+    const cacheKey = `product:detail:${slug}`;
 
-    const { data, fromCache } = await cache.getOrFetch(cacheKey, () =>
-      Product.findOne({ slug }).lean()
-    );
+    const { data, fromCache } = await cache.getOrFetch(cacheKey, async () => {
+      const row = await products().findUnique({ where: { slug }, include: FULL_INCLUDE });
+      return row ? productToApi(row) : null;
+    });
 
     cache.setCacheHeaders(res, fromCache, cache.resolveTTL(cacheKey));
     res.send(data);
   } catch (err) {
-    res.status(500).send({
-      message: `Slug problem, ${err.message}`,
-    });
+    res.status(500).send({ message: `Slug problem, ${err.message}` });
   }
 };
 
 const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate({ path: "category", select: "_id, name" })
-      .populate({ path: "categories", select: "_id name" });
-
-    res.send(product);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "¡Producto no encontrado!");
+    const row = await products().findUnique({
+      where: { id: req.params.id },
+      include: FULL_INCLUDE,
     });
+    if (!row) return notFound(res, "¡Producto no encontrado!");
+    res.send(productToApi(row));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const updateProduct = async (req, res) => {
-  // console.log('update product')
-  // console.log('variant',req.body.variants)
   try {
-    const product = await Product.findById(req.params.id);
-    // console.log("product", product);
+    if (!isUuid(req.params.id)) return notFound(res, "¡Producto no encontrado!");
+    const current = await products().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "¡Producto no encontrado!");
 
-    if (product) {
-      product.title = { ...product.title, ...req.body.title };
-      product.description = {
-        ...product.description,
-        ...req.body.description,
-      };
+    const data = toRow(req.body);
 
-      product.productId = req.body.productId;
-      product.sku = req.body.sku;
-      product.barcode = req.body.barcode;
-      product.slug = req.body.slug;
-      product.categories = req.body.categories;
-      product.category = req.body.category;
-      product.show = req.body.show;
-      product.isCombination = req.body.isCombination;
-      product.variants = req.body.variants;
-      product.stock = req.body.stock;
-      product.prices = req.body.prices;
-      product.image = req.body.image;
-      product.tag = req.body.tag;
-      product.pet = req.body.pet || null;
-      product.brand = req.body.brand || null;
-
-      // ─── Extended product fields ───────────────────────────────
-      if (req.body.productType !== undefined) product.productType = req.body.productType;
-      if (req.body.petCompatibility !== undefined) product.petCompatibility = req.body.petCompatibility;
-      if (req.body.quickInfo !== undefined) product.quickInfo = req.body.quickInfo;
-      if (req.body.packageInfo !== undefined) product.packageInfo = req.body.packageInfo;
-      if (req.body.benefits !== undefined) product.benefits = { ...product.benefits, ...req.body.benefits };
-      if (req.body.features !== undefined) product.features = { ...product.features, ...req.body.features };
-      if (req.body.ingredients !== undefined) product.ingredients = { ...product.ingredients, ...req.body.ingredients };
-      if (req.body.feedingGuide !== undefined) product.feedingGuide = { ...product.feedingGuide, ...req.body.feedingGuide };
-      if (req.body.indications !== undefined) product.indications = { ...product.indications, ...req.body.indications };
-      if (req.body.warnings !== undefined) product.warnings = { ...product.warnings, ...req.body.warnings };
-      if (req.body.dosage !== undefined) product.dosage = { ...product.dosage, ...req.body.dosage };
-      if (req.body.recommendedFor !== undefined) product.recommendedFor = { ...product.recommendedFor, ...req.body.recommendedFor };
-      if (req.body.brandInfo !== undefined) product.brandInfo = { ...product.brandInfo, ...req.body.brandInfo };
-      if (req.body.nutritionTable !== undefined) product.nutritionTable = req.body.nutritionTable;
-      if (req.body.technicalSpecs !== undefined) product.technicalSpecs = req.body.technicalSpecs;
-      if (req.body.consumptionGuide !== undefined) product.consumptionGuide = req.body.consumptionGuide;
-      if (req.body.productHighlights !== undefined) product.productHighlights = req.body.productHighlights;
-      if (req.body.keyFacts !== undefined) product.keyFacts = req.body.keyFacts;
-      if (req.body.visualTags !== undefined) product.visualTags = req.body.visualTags;
-      if (req.body.iconTags !== undefined) product.iconTags = req.body.iconTags;
-
-      const oldSlug = product.slug;
-      await product.save();
-      invalidateProductBySlug(oldSlug);
-      invalidateProductBySlug(req.body.slug);
-      invalidateProducts();
-      res.send({ data: product, message: "¡Producto actualizado correctamente!" });
-    } else {
-      res.status(404).send({
-        message: "¡Producto no encontrado!",
-      });
+    // Los textos multi-idioma se fusionan: el panel edita un idioma a la vez.
+    const MERGE_FIELDS = [
+      "title", "description", "benefits", "features", "ingredients",
+      "feedingGuide", "indications", "warnings", "dosage",
+      "recommendedFor", "brandInfo",
+    ];
+    for (const field of MERGE_FIELDS) {
+      if (req.body[field] !== undefined) {
+        data[field] = { ...(current[field] || {}), ...(req.body[field] || {}) };
+      }
     }
+
+    if (req.body.category !== undefined && isUuid(req.body.category)) {
+      data.categoryId = req.body.category;
+    }
+    if (req.body.pet !== undefined) data.petId = isUuid(req.body.pet) ? req.body.pet : null;
+    if (req.body.brand !== undefined) data.brandId = isUuid(req.body.brand) ? req.body.brand : null;
+
+    const oldSlug = current.slug;
+
+    // Categorías y variantes se reemplazan por completo, que es la semántica
+    // que tenían al ser arrays embebidos.
+    const updated = await prisma().$transaction(async (tx) => {
+      if (req.body.categories !== undefined || req.body.category !== undefined) {
+        await tx.productCategory.deleteMany({ where: { productId: req.params.id } });
+        const ids = categoryIdsFrom(req.body);
+        if (ids.length) {
+          await tx.productCategory.createMany({
+            data: ids.map((id) => ({ productId: req.params.id, categoryId: id })),
+          });
+        }
+      }
+
+      if (req.body.variants !== undefined) {
+        await tx.productVariant.deleteMany({ where: { productId: req.params.id } });
+        const rows = toVariantRows(req.body.variants);
+        if (rows.length) {
+          await tx.productVariant.createMany({
+            data: rows.map((v) => ({ ...v, productId: req.params.id })),
+          });
+        }
+      }
+
+      return tx.product.update({
+        where: { id: req.params.id },
+        data,
+        include: FULL_INCLUDE,
+      });
+    });
+
+    invalidateProductBySlug(oldSlug);
+    if (req.body.slug) invalidateProductBySlug(req.body.slug);
+    invalidateProducts();
+
+    res.send({ data: productToApi(updated), message: "¡Producto actualizado correctamente!" });
   } catch (err) {
     res.status(404).send(err.message);
   }
@@ -255,71 +398,51 @@ const updateProduct = async (req, res) => {
 
 const updateManyProducts = async (req, res) => {
   try {
-    const updatedData = {};
-    for (const key of Object.keys(req.body)) {
-      if (
-        req.body[key] !== "[]" &&
-        Object.entries(req.body[key]).length > 0 &&
-        req.body[key] !== req.body.ids
-      ) {
-        // console.log('req.body[key]', typeof req.body[key]);
-        updatedData[key] = req.body[key];
-      }
-    }
+    const data = toRow(req.body);
+    // Sólo campos escalares: nombres, variantes y categorías no tienen sentido
+    // aplicados en bloque.
+    delete data.title;
+    delete data.description;
+    delete data.slug;
 
-    // console.log("updated data", updatedData);
-
-    await Product.updateMany(
-      { _id: { $in: req.body.ids } },
-      {
-        $set: updatedData,
-      },
-      {
-        multi: true,
-      }
-    );
+    await products().updateMany({ where: { id: { in: uuidList(req.body.ids) } }, data });
     invalidateProducts();
-    res.send({
-      message: "¡Productos actualizados correctamente!",
-    });
+    res.send({ message: "¡Productos actualizados correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateStatus = async (req, res) => {
   try {
-    const newStatus = req.body.status;
-
-    await Product.updateOne(
-      { _id: req.params.id },
-      { $set: { status: newStatus } }
-    );
-
+    if (!isUuid(req.params.id)) return notFound(res, "¡Producto no encontrado!");
+    const status = req.body.status;
+    await products().update({ where: { id: req.params.id }, data: { status } });
     invalidateProducts();
-    res.status(200).send({
-      message: `¡Producto ${newStatus} correctamente!`,
-    });
+    res.status(200).send({ message: `¡Producto ${status} correctamente!` });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteProduct = async (req, res) => {
   try {
-    await Product.deleteOne({ _id: req.params.id });
+    if (!isUuid(req.params.id)) return notFound(res, "¡Producto no encontrado!");
+    await products().delete({ where: { id: req.params.id } });
     invalidateProducts();
-    res.status(200).send({
-      message: "¡Producto eliminado correctamente!",
-    });
+    res.status(200).send({ message: "¡Producto eliminado correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
+  }
+};
+
+const deleteManyProducts = async (req, res) => {
+  try {
+    await products().deleteMany({ where: { id: { in: uuidList(req.body.ids) } } });
+    invalidateProducts();
+    res.send({ message: "¡Productos eliminados correctamente!" });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
@@ -327,18 +450,16 @@ const getShowingStoreProducts = async (req, res) => {
   try {
     const { category, title, slug, pet, brand } = req.query;
 
-    // ── Validación de longitud de búsqueda ──
     if (title && title.length > 100) {
-      return res.status(400).send({ message: "Búsqueda demasiado larga (máximo 100 caracteres)." });
+      return res
+        .status(400)
+        .send({ message: "Búsqueda demasiado larga (máximo 100 caracteres)." });
     }
 
-    // ── Admin bypass: no cachear para admins ──
-    const isAdminUser = req.user && (req.user.role === "Admin" || req.user.role === "Super Admin");
-    if (isAdminUser) {
-      cache.trackBypass();
-    }
+    const isAdminUser =
+      req.user && (req.user.role === "Admin" || req.user.role === "Super Admin");
+    if (isAdminUser) cache.trackBypass();
 
-    // ── Construir cache key normalizada ──
     let cacheKey;
     let ttl;
     if (slug) {
@@ -359,7 +480,6 @@ const getShowingStoreProducts = async (req, res) => {
       ttl = 60;
     }
 
-    // ── Cache-first (skip para admins) ──
     if (!isAdminUser) {
       const { data: cached, fromCache } = await cache.getOrFetch(
         cacheKey,
@@ -370,189 +490,116 @@ const getShowingStoreProducts = async (req, res) => {
       return res.send(cached);
     }
 
-    // Admin: query directa sin cache
     const data = await executeStoreQuery({ category, title, slug, pet, brand });
     cache.setCacheHeaders(res, false, 0, "admin");
     res.send(data);
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 /**
- * Ejecuta la query real a MongoDB para getShowingStoreProducts.
- * Extraído para ser usado tanto en cache miss como en admin bypass.
+ * Consulta real de la tienda. Se extrajo para servir tanto al fallo de caché
+ * como al bypass de administrador.
  */
 async function executeStoreQuery({ category, title, slug, pet, brand }) {
-  const queryObject = { status: "show" };
-  let categoryFilterIds = [];
+  const where = { status: "show" };
 
-  if (category) {
-    const categories = await Category.find({ status: "show" })
-      .select("_id parentId")
-      .lean();
-    categoryFilterIds = findDescendantCategoryIds(categories, category);
-  }
-  if (pet) {
-    queryObject.pet = pet;
-  }
-  if (brand) {
-    queryObject.brand = brand;
-  }
+  if (pet && isUuid(String(pet))) where.petId = String(pet);
+  if (brand && isUuid(String(brand))) where.brandId = String(brand);
+  if (slug) where.slug = { contains: String(slug), mode: "insensitive" };
+  if (title) where.id = { in: await searchProductIds(String(title)) };
 
-  if (title) {
-    const safeTitle = escapeRegex(title);
-    const regex = { $regex: safeTitle, $options: "i" };
-
-    const fieldQueries = languageCodes.flatMap((lang) => [
-      { [`title.${lang}`]: regex },
-      { [`description.${lang}`]: regex },
-    ]);
-    fieldQueries.push({ tag: regex });
-
-    const [matchingBrands, matchingCategories] = await Promise.all([
-      Brand.find({
-        $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
-      }).select("_id").maxTimeMS(5000),
-      Category.find({
-        $or: languageCodes.map((lang) => ({ [`name.${lang}`]: regex })),
-      }).select("_id").maxTimeMS(5000),
-    ]);
-
-    if (matchingBrands.length > 0) {
-      fieldQueries.push({ brand: { $in: matchingBrands.map((b) => b._id) } });
-    }
-    if (matchingCategories.length > 0) {
-      const catIds = matchingCategories.map((c) => c._id);
-      fieldQueries.push({ category: { $in: catIds } });
-      fieldQueries.push({ categories: { $in: catIds } });
-    }
-
-    queryObject.$or = fieldQueries;
-  }
-
-  if (categoryFilterIds.length > 0) {
-    const categoryClause = {
-      $or: [
-        { categories: { $in: categoryFilterIds } },
-        { category: { $in: categoryFilterIds } },
-      ],
-    };
-
-    if (queryObject.$or) {
-      queryObject.$and = [{ $or: queryObject.$or }, categoryClause];
-      delete queryObject.$or;
-    } else {
-      queryObject.$or = categoryClause.$or;
+  if (category && isUuid(String(category))) {
+    const cats = await prisma().category.findMany({
+      where: { status: "show" },
+      select: { id: true, parentId: true },
+    });
+    const ids = findDescendantCategoryIds(
+      cats.map((c) => ({ _id: c.id, parentId: c.parentId })),
+      category
+    );
+    if (ids.length > 0) {
+      where.OR = [
+        { categoryId: { in: ids } },
+        { categories: { some: { categoryId: { in: ids } } } },
+      ];
     }
   }
 
-  if (slug) {
-    queryObject.slug = { $regex: escapeRegex(slug), $options: "i" };
-  }
-
-  let products = [];
+  let productRows = [];
   let popularProducts = [];
   let discountedProducts = [];
   let relatedProducts = [];
   let reviews = [];
 
   if (slug) {
-    products = await Product.find(queryObject)
-      .populate({ path: "category", select: "name _id" })
-      .populate({ path: "pet", select: "name _id" })
-      .populate({ path: "brand", select: "name _id" })
-      .sort({ _id: -1 })
-      .limit(100)
-      .maxTimeMS(5000)
-      .lean();
-    relatedProducts = await Product.find({
-      category: products[0]?.category,
-    }).populate({ path: "category", select: "_id name" })
-      .populate({ path: "pet", select: "name _id" })
-      .populate({ path: "brand", select: "name _id" })
-      .maxTimeMS(5000)
-      .lean();
-    if (products[0]?._id) {
-      reviews = await Review.find({ product: products[0]._id, status: "approved" }).populate({
-        path: "user",
-        select: "name image",
-      }).maxTimeMS(5000).lean();
+    productRows = await products().findMany({
+      where,
+      include: FULL_INCLUDE,
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    const first = productRows[0];
+    if (first) {
+      relatedProducts = await products().findMany({
+        where: { categoryId: first.categoryId, id: { not: first.id }, status: "show" },
+        include: FULL_INCLUDE,
+      });
+      reviews = await prisma().review.findMany({
+        where: { productId: first.id, status: "approved" },
+        include: { customer: { select: { id: true, name: true, image: true } } },
+      });
     }
   } else if (title || category || pet || brand) {
-    products = await Product.find(queryObject)
-      .populate({ path: "category", select: "name _id" })
-      .populate({ path: "pet", select: "name _id" })
-      .populate({ path: "brand", select: "name _id" })
-      .sort({ _id: -1 })
-      .limit(100)
-      .maxTimeMS(5000)
-      .lean();
+    productRows = await products().findMany({
+      where,
+      include: FULL_INCLUDE,
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
   } else {
-    [products, popularProducts, discountedProducts] = await Promise.all([
-      Product.find({ status: "show" })
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(100)
-        .maxTimeMS(5000)
-        .lean(),
-      Product.find({ status: "show" })
-        .populate({ path: "category", select: "name _id" })
-        .populate({ path: "pet", select: "name _id" })
-        .populate({ path: "brand", select: "name _id" })
-        .sort({ sales: -1 })
-        .limit(20)
-        .maxTimeMS(5000)
-        .lean(),
-      Product.find({
-        status: "show",
-        $or: [
-          {
-            $and: [
-              { isCombination: true },
-              { variants: { $elemMatch: { discount: { $gt: "0.00" } } } },
-            ],
-          },
-          {
-            $and: [
-              { isCombination: false },
-              { $expr: { $gt: [{ $toDouble: "$prices.discount" }, 0] } },
-            ],
-          },
-        ],
-      })
-        .populate({ path: "category", select: "name _id" })
-        .sort({ _id: -1 })
-        .limit(20)
-        .maxTimeMS(5000)
-        .lean(),
+    [productRows, popularProducts, discountedProducts] = await Promise.all([
+      products().findMany({
+        where: { status: "show" },
+        include: FULL_INCLUDE,
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      products().findMany({
+        where: { status: "show" },
+        include: FULL_INCLUDE,
+        orderBy: { sales: "desc" },
+        take: 20,
+      }),
+      // El descuento ahora es numérico: antes se comparaba contra el string
+      // "0.00", lo que dejaba fuera casos como "0.5".
+      products().findMany({
+        where: {
+          status: "show",
+          OR: [
+            { isCombination: true, variants: { some: { discount: { gt: 0 } } } },
+            { isCombination: false, discount: { gt: 0 } },
+          ],
+        },
+        include: FULL_INCLUDE,
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
     ]);
   }
 
-  return { reviews, products, popularProducts, relatedProducts, discountedProducts };
+  const { reviewToApi } = require("../lib/prisma/presenters");
+
+  return {
+    reviews: reviews.map(reviewToApi),
+    products: productRows.map(productToApi),
+    popularProducts: popularProducts.map(productToApi),
+    relatedProducts: relatedProducts.map(productToApi),
+    discountedProducts: discountedProducts.map(productToApi),
+  };
 }
-
-const deleteManyProducts = async (req, res) => {
-  try {
-    const cname = req.cname;
-    // console.log("deleteMany", cname, req.body.ids);
-
-    await Product.deleteMany({ _id: req.body.ids });
-
-    invalidateProducts();
-    res.send({
-      message: `¡Productos eliminados correctamente!`,
-    });
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
-  }
-};
 
 module.exports = {
   addProduct,

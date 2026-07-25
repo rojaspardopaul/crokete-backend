@@ -1,150 +1,126 @@
-const Pet = require("../models/Pet");
+const { getPrisma } = require("../lib/prisma");
+const { toApi } = require("../lib/prisma/presenters");
+const { isUuid, uuidList, fail, notFound } = require("../lib/prisma/helpers");
+
+const prisma = () => getPrisma().pet;
+
+function toRow(body) {
+  const row = {};
+  if (body.name !== undefined) row.name = body.name;
+  if (body.icon !== undefined) row.icon = body.icon;
+  if (body.status !== undefined) row.status = body.status;
+  return row;
+}
 
 const addPet = async (req, res) => {
   try {
-    const newPet = new Pet(req.body);
-    await newPet.save();
-    res.status(200).send({
-      message: "Mascota agregada correctamente!",
-    });
+    await prisma().create({ data: toRow(req.body) });
+    res.status(200).send({ message: "Mascota agregada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const addAllPets = async (req, res) => {
   try {
-    await Pet.deleteMany();
-    await Pet.insertMany(req.body);
-    res.status(200).send({
-      message: "Mascotas agregadas correctamente!",
-    });
+    await prisma().deleteMany();
+    await prisma().createMany({ data: (req.body || []).map(toRow) });
+    res.status(200).send({ message: "Mascotas agregadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getAllPets = async (req, res) => {
   try {
-    const pets = await Pet.find({}).sort({ _id: -1 });
-    res.send(pets);
+    const rows = await prisma().findMany({ orderBy: { createdAt: "desc" } });
+    res.send(rows.map(toApi));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getShowingPets = async (req, res) => {
   try {
-    const pets = await Pet.find({ status: "show" }).sort({ name: 1 });
-    res.send(pets);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    const rows = await prisma().findMany({
+      where: { status: "show" },
+      orderBy: { name: "asc" },
     });
+    res.send(rows.map(toApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getPetById = async (req, res) => {
   try {
-    const pet = await Pet.findById(req.params.id);
-    res.send(pet);
+    if (!isUuid(req.params.id)) return notFound(res, "Mascota no encontrada.");
+    const row = await prisma().findUnique({ where: { id: req.params.id } });
+    if (!row) return notFound(res, "Mascota no encontrada.");
+    res.send(toApi(row));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updatePet = async (req, res) => {
   try {
-    const pet = await Pet.findById(req.params.id);
-    if (pet) {
-      pet.name = { ...pet.name, ...req.body.name };
-      pet.icon = req.body.icon;
-      pet.status = req.body.status;
-      await pet.save();
-      res.send({ message: "Mascota actualizada correctamente!" });
+    if (!isUuid(req.params.id)) return notFound(res, "Mascota no encontrada.");
+    const current = await prisma().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "Mascota no encontrada.");
+
+    const data = toRow(req.body);
+    // Igual que en marcas: el panel puede mandar sólo un idioma.
+    if (req.body.name !== undefined) {
+      data.name = { ...(current.name || {}), ...(req.body.name || {}) };
     }
+
+    await prisma().update({ where: { id: req.params.id }, data });
+    res.send({ message: "Mascota actualizada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateStatus = async (req, res) => {
   try {
-    const newStatus = req.body.status;
-    await Pet.updateOne(
-      { _id: req.params.id },
-      { $set: { status: newStatus } }
-    );
+    if (!isUuid(req.params.id)) return notFound(res, "Mascota no encontrada.");
+    const status = req.body.status;
+    await prisma().update({ where: { id: req.params.id }, data: { status } });
     res.status(200).send({
-      message: `Mascota ${newStatus === "show" ? "publicada" : "ocultada"} correctamente!`,
+      message: `Mascota ${status === "show" ? "publicada" : "ocultada"} correctamente!`,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deletePet = async (req, res) => {
   try {
-    await Pet.deleteOne({ _id: req.params.id });
-    res.status(200).send({
-      message: "Mascota eliminada correctamente!",
-    });
+    if (!isUuid(req.params.id)) return notFound(res, "Mascota no encontrada.");
+    await prisma().delete({ where: { id: req.params.id } });
+    res.status(200).send({ message: "Mascota eliminada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const deleteManyPets = async (req, res) => {
   try {
-    await Pet.deleteMany({ _id: req.body.ids });
-    res.status(200).send({
-      message: "Mascotas eliminadas correctamente!",
-    });
+    await prisma().deleteMany({ where: { id: { in: uuidList(req.body.ids) } } });
+    res.status(200).send({ message: "Mascotas eliminadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateManyPets = async (req, res) => {
   try {
-    const updatedData = {};
-    for (const key of Object.keys(req.body)) {
-      if (
-        req.body[key] !== "[]" &&
-        Object.entries(req.body[key]).length > 0 &&
-        req.body[key] !== req.body.ids
-      ) {
-        updatedData[key] = req.body[key];
-      }
-    }
-    await Pet.updateMany(
-      { _id: { $in: req.body.ids } },
-      { $set: updatedData },
-      { multi: true }
-    );
-    res.send({
-      message: "Mascotas actualizadas correctamente!",
-    });
+    const data = toRow(req.body);
+    await prisma().updateMany({ where: { id: { in: uuidList(req.body.ids) } }, data });
+    res.send({ message: "Mascotas actualizadas correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 

@@ -1,112 +1,99 @@
-//models
-const Setting = require("../models/Setting");
+const { getPrisma } = require("../lib/prisma");
+const { toApi } = require("../lib/prisma/presenters");
+const { fail, notFound } = require("../lib/prisma/helpers");
 const { getConfigStatus, invalidateConfigCache } = require("../utils/getConfig");
 
-//global setting controller
+const settings = () => getPrisma().setting;
+
+/** Devuelve el objeto `setting` de una configuración con nombre dado. */
+async function readSetting(name) {
+  const row = await settings().findUnique({ where: { name } });
+  return row ? row.setting : null;
+}
+
+/**
+ * Fusiona claves de primer nivel dentro del jsonb, creando la fila si no
+ * existe. El operador `||` de jsonb hace exactamente el mismo merge superficial
+ * que `$set: { "setting.<clave>": valor }` en Mongo, pero en una sola sentencia
+ * atómica: no hay lectura-modificación-escritura que se pueda perder si dos
+ * pestañas del panel guardan a la vez.
+ */
+async function mergeSetting(name, patch) {
+  const prisma = getPrisma();
+  const rows = await prisma.$queryRaw`
+    INSERT INTO settings (id, name, setting, "createdAt", "updatedAt")
+    VALUES (gen_random_uuid(), ${name}, ${JSON.stringify(patch || {})}::jsonb, now(), now())
+    ON CONFLICT (name) DO UPDATE
+      SET setting = settings.setting || EXCLUDED.setting,
+          "updatedAt" = now()
+    RETURNING *`;
+  return toApi(rows[0]);
+}
+
+// ─── Configuración global ────────────────────────────────────────────────────
+
 const addGlobalSetting = async (req, res) => {
   try {
-    const newGlobalSetting = new Setting(req.body);
-    await newGlobalSetting.save();
-    res.send({
-      message: "¡Configuración global agregada correctamente!",
+    await settings().create({
+      data: { name: req.body.name || "globalSetting", setting: req.body.setting || {} },
     });
+    res.send({ message: "¡Configuración global agregada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getGlobalSetting = async (req, res) => {
   try {
-    // console.log("getGlobalSetting");
-
-    const globalSetting = await Setting.findOne({ name: "globalSetting" });
-    res.send(globalSetting.setting);
+    const setting = await readSetting("globalSetting");
+    if (!setting) return notFound(res, "¡Configuración global no encontrada!");
+    res.send(setting);
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateGlobalSetting = async (req, res) => {
   try {
-    const { setting } = req.body;
-
-    // Construct the $set object dynamically
-    const setObject = Object.keys(setting).reduce((acc, key) => {
-      acc[`setting.${key}`] = setting[key];
-      return acc;
-    }, {});
-
-    const globalSetting = await Setting.findOneAndUpdate(
-      { name: "globalSetting" },
-      { $set: setObject },
-      { new: true, upsert: true }
-    );
-
-    res.send({
-      data: globalSetting,
-      message: "¡Configuración global actualizada correctamente!",
-    });
+    const data = await mergeSetting("globalSetting", req.body.setting);
+    res.send({ data, message: "¡Configuración global actualizada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-//store setting controller
+// ─── Configuración de la tienda ──────────────────────────────────────────────
+
 const addStoreSetting = async (req, res) => {
   try {
-    const newStoreSetting = new Setting(req.body);
-    await newStoreSetting.save();
-    res.send({
-      message: "¡Configuración de la tienda agregada correctamente!",
+    await settings().create({
+      data: { name: req.body.name || "storeSetting", setting: req.body.setting || {} },
     });
+    res.send({ message: "¡Configuración de la tienda agregada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getStoreSetting = async (req, res) => {
   try {
-    const storeSetting = await Setting.findOne({ name: "storeSetting" });
-
-    // console.log("storeSetting", req.query);
-
-    if (!storeSetting) {
-      return res.status(404).send({ message: "¡Configuración de la tienda no encontrada!" });
-    }
-    if (req.query.filter === "all") {
-      return res.send(storeSetting.setting);
-    }
+    const setting = await readSetting("storeSetting");
+    if (!setting) return notFound(res, "¡Configuración de la tienda no encontrada!");
+    if (req.query.filter === "all") return res.send(setting);
 
     const {
-      cod_status,
-      fb_pixel_key,
-      fb_pixel_status,
-      google_analytic_key,
-      google_analytic_status,
-      google_login_status,
-      google_id,
-      facebook_login_status,
-      facebook_id,
-      github_login_status,
-      github_id,
-      meta_url,
-      razorpay_id,
-      razorpay_status,
-      stripe_key,
-      stripe_status,
-      tawk_chat_property_id,
-      tawk_chat_status,
-      tawk_chat_widget_id,
-    } = storeSetting.setting;
+      cod_status, fb_pixel_key, fb_pixel_status,
+      google_analytic_key, google_analytic_status,
+      google_login_status, google_id,
+      facebook_login_status, facebook_id,
+      github_login_status, github_id,
+      meta_url, razorpay_id, razorpay_status,
+      stripe_key, stripe_status,
+      tawk_chat_property_id, tawk_chat_status, tawk_chat_widget_id,
+    } = setting;
 
+    // El endpoint público nunca expone ids/secretos de OAuth: sólo banderas
+    // derivadas que le dicen al front si el proveedor está realmente listo.
     res.send({
       cod_status,
       fb_pixel_key,
@@ -129,186 +116,94 @@ const getStoreSetting = async (req, res) => {
       github_oauth_ready: !!(github_login_status && github_id),
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 const getStoreSecretKeys = async (req, res) => {
   try {
-    const storeSetting = await Setting.findOne({ name: "storeSetting" });
-
-    if (!storeSetting) {
-      return res.status(404).send({ message: "¡Configuración de la tienda no encontrada!" });
-    }
+    const setting = await readSetting("storeSetting");
+    if (!setting) return notFound(res, "¡Configuración de la tienda no encontrada!");
 
     const {
-      google_id,
-      google_secret,
-      google_login_status,
-      facebook_id,
-      facebook_secret,
-      facebook_login_status,
-      github_id,
-      github_secret,
-      github_login_status,
-      razorpay_id,
-      razorpay_secret,
-      stripe_secret,
-      nextauth_secret,
-    } = storeSetting.setting;
+      google_id, google_secret, google_login_status,
+      facebook_id, facebook_secret, facebook_login_status,
+      github_id, github_secret, github_login_status,
+      razorpay_id, razorpay_secret, stripe_secret, nextauth_secret,
+    } = setting;
 
     res.send({
-      google_id,
-      google_secret,
-      google_login_status,
-      facebook_id,
-      facebook_secret,
-      facebook_login_status,
-      github_id,
-      github_secret,
-      github_login_status,
-      razorpay_id,
-      razorpay_secret,
-      stripe_secret,
-      nextauth_secret,
+      google_id, google_secret, google_login_status,
+      facebook_id, facebook_secret, facebook_login_status,
+      github_id, github_secret, github_login_status,
+      razorpay_id, razorpay_secret, stripe_secret, nextauth_secret,
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 const updateStoreSetting = async (req, res) => {
   try {
-    const { setting } = req.body;
-
-    // Dynamically build the update fields
-    const updateFields = Object.keys(setting).reduce((acc, key) => {
-      acc[`setting.${key}`] = setting[key];
-      return acc;
-    }, {});
-    // Update the online store setting document
-    const storeSetting = await Setting.findOneAndUpdate(
-      { name: "storeSetting" },
-      { $set: updateFields },
-      { new: true, upsert: true } // upsert to create the document if it doesn't exist
-    );
-
+    const data = await mergeSetting("storeSetting", req.body.setting);
     invalidateConfigCache();
-
-    res.send({
-      data: storeSetting,
-      message: "¡Configuración de la tienda actualizada correctamente!",
-    });
+    res.send({ data, message: "¡Configuración de la tienda actualizada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
-//online store customization controller
+// ─── Personalización de la tienda ────────────────────────────────────────────
+
 const addStoreCustomizationSetting = async (req, res) => {
   try {
-    const newStoreCustomizationSetting = new Setting(req.body);
-    const storeCustomizationSetting = await newStoreCustomizationSetting.save();
-
+    const row = await settings().create({
+      data: {
+        name: req.body.name || "storeCustomizationSetting",
+        setting: req.body.setting || {},
+      },
+    });
     res.send({
-      data: storeCustomizationSetting,
+      data: toApi(row),
       message: "¡Personalización de la tienda agregada correctamente!",
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getStoreCustomizationSetting = async (req, res) => {
   try {
-    // const { key, keyTwo } = req.query;
-    // console.log("getStoreCustomizationSetting");
-
-    // console.log("req query", req.query, "key", key, "keyTwo", keyTwo);
-
-    // let projection = {};
-    // if (key) {
-    //   projection[`setting.${key}`] = 1;
-    // }
-    // if (keyTwo) {
-    //   projection[`setting.${keyTwo}`] = 1;
-    // }
-
-    // // If neither key nor keyTwo is provided, fetch all settings
-    // if (!key && !keyTwo) {
-    //   projection = { setting: 1 };
-    // }
-
-    const storeCustomizationSetting = await Setting.findOne(
-      { name: "storeCustomizationSetting" }
-      // projection
-    );
-
-    if (!storeCustomizationSetting) {
-      return res.status(404).send({ message: "Configuración no encontrada" });
-    }
-
-    res.send(storeCustomizationSetting.setting);
+    const setting = await readSetting("storeCustomizationSetting");
+    if (!setting) return notFound(res, "Configuración no encontrada");
+    res.send(setting);
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 const getStoreSeoSetting = async (req, res) => {
-  // console.log("getStoreSeoSetting");
   try {
-    const storeCustomizationSetting = await Setting.findOne(
-      {
-        name: "storeCustomizationSetting",
-      },
-      { "setting.seo": 1, _id: 0 }
-    );
-    // console.log("storeCustomizationSetting", storeCustomizationSetting);
-    res.send(storeCustomizationSetting?.setting);
+    res.send(await readSetting("storeCustomizationSetting"));
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const updateStoreCustomizationSetting = async (req, res) => {
   try {
-    const { setting } = req.body;
-
-    // Dynamically build the update fields
-    const updateFields = Object.keys(setting).reduce((acc, key) => {
-      acc[`setting.${key}`] = setting[key];
-      return acc;
-    }, {});
-    // Update the online store setting document
-    const storeCustomizationSetting = await Setting.findOneAndUpdate(
-      { name: "storeCustomizationSetting" },
-      { $set: updateFields },
-      { new: true, upsert: true } // upsert to create the document if it doesn't exist
-    );
-
-    res.send({
-      data: storeCustomizationSetting,
-      message: "¡Personalización de la tienda actualizada correctamente!",
-    });
+    const data = await mergeSetting("storeCustomizationSetting", req.body.setting);
+    res.send({ data, message: "¡Personalización de la tienda actualizada correctamente!" });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getConfigStatusEndpoint = async (req, res) => {
   try {
-    const status = await getConfigStatus();
-    res.send(status);
+    res.send(await getConfigStatus());
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
