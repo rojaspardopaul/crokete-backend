@@ -15,6 +15,8 @@ const {
   forgetPasswordEmailBody,
 } = require("../lib/email-sender/templates/forget-password");
 const { sendVerificationCode } = require("../lib/phone-verification/sender");
+const { recordFailedAttempt, resetLoginAttempts } = require("../lib/security/rateLimiter");
+const { getIpFromRequest } = require("../lib/security/auditLogger");
 const { getPrisma, getPrismaNamespace } = require("../lib/prisma");
 const { customerToApi } = require("../lib/prisma/presenters");
 const { isUuid } = require("../lib/prisma/helpers");
@@ -239,6 +241,7 @@ const addAllCustomers = async (req, res) => {
 
 const loginCustomer = async (req, res) => {
   try {
+    const ip = getIpFromRequest(req);
     const row = await customers().findUnique({ where: byEmail(req.body.email) });
 
     if (
@@ -246,6 +249,7 @@ const loginCustomer = async (req, res) => {
       row.password &&
       bcrypt.compareSync(req.body.password, row.password)
     ) {
+      await resetLoginAttempts(req.body.email, ip);
       const customer = customerToApi(row);
       const accessToken = generateAccessToken(customer);
       const refreshToken = generateRefreshToken(customer);
@@ -264,6 +268,9 @@ const loginCustomer = async (req, res) => {
         image: customer.image,
       });
     } else {
+      // Se cuenta el fallo tanto si el correo no existe como si la contraseña
+      // es incorrecta: distinguirlos revelaría qué cuentas están registradas.
+      await recordFailedAttempt(req.body.email, ip);
       res.status(401).send({
         message: "¡Usuario o contraseña inválidos!",
         error: "¡Usuario o contraseña inválidos!",

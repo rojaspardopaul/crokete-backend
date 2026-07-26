@@ -5,7 +5,7 @@ const helmet = require("helmet");
 
 const { getPrisma, disconnectPrisma } = require("../lib/prisma");
 const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
-const { globalLimiter, searchLimiter, paymentLimiter } = require("../lib/security/apiRateLimiter");
+const { globalLimiter, searchLimiter, paymentLimiter, uploadLimiter } = require("../lib/security/apiRateLimiter");
 const { warmCache } = require("../lib/cache/warming");
 const reviewRoutes = require("../routes/reviewRoutes");
 const customerRoutes = require("../routes/customerRoutes");
@@ -189,7 +189,7 @@ app.use("/v1/payment-logs/", isAuth, isAdmin, paymentLogRoutes);
 app.use("/v1/ai/", isAuth, aiRoutes);
 
 // Centralized image uploads (admin only) — normalizes to webp + uniform size
-app.use("/v1/upload/", isAuth, uploadRoutes);
+app.use("/v1/upload/", isAuth, uploadLimiter, uploadRoutes);
 
 // Contact form (public)
 app.use("/v1/contact", contactRoutes);

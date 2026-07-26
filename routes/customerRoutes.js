@@ -26,6 +26,10 @@ const {
   phoneVerificationLimit,
 } = require("../lib/email-sender/sender");
 const { loginRateLimiter } = require("../lib/security/apiRateLimiter");
+// Bloqueo por cuenta (5 fallos → 30 min), el mismo que ya protegía al panel.
+// El limitador de arriba es sólo por IP, así que por sí solo no frena un ataque
+// repartido entre varias direcciones contra una misma cuenta.
+const { loginRateLimiter: accountLockout } = require("../lib/security/rateLimiter");
 const { isAuth, isSuperAdmin } = require("../config/auth");
 
 //verify email
@@ -50,7 +54,7 @@ router.delete("/shipping/address/:userId/:shippingId", isAuth, deleteShippingAdd
 router.post("/register/:token", loginRateLimiter, registerCustomer);
 
 //login a user
-router.post("/login", loginRateLimiter, loginCustomer);
+router.post("/login", loginRateLimiter, accountLockout, loginCustomer);
 
 // refresh token
 router.post("/refresh", refreshToken);
