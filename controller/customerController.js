@@ -31,6 +31,31 @@ const byEmail = (email) => ({ email: String(email || "").toLowerCase() });
  */
 const PUBLIC = { omit: { password: true } };
 
+/**
+ * Las rutas de perfil y dirección van bajo `isAuth`, que sólo comprueba que haya
+ * una sesión válida — no de quién es el `:id` de la URL. Sin esto, cualquier
+ * cliente autenticado podía leer y modificar la ficha de otro: sus datos de
+ * contacto, su dirección y, cambiándole el correo, quedarse con la cuenta.
+ *
+ * El panel usa estos mismos endpoints, así que se permite también al
+ * administrador. Clientes y administradores viven en tablas distintas, de modo
+ * que un id de cliente nunca casará con una fila de admin.
+ */
+async function puedeAccederAlCliente(req, customerId) {
+  const solicitante = req.user?._id;
+  if (!isUuid(solicitante) || !isUuid(customerId)) return false;
+  if (solicitante === customerId) return true;
+
+  const admin = await getPrisma().admin.findFirst({
+    where: { id: solicitante, status: "activo" },
+    select: { id: true },
+  });
+  return !!admin;
+}
+
+/** 404 en vez de 403: no confirma si ese cliente existe. */
+const NO_AUTORIZADO = { message: "¡Cliente no encontrado!" };
+
 const verifyEmailAddress = async (req, res) => {
   const isAdded = await customers().findUnique({ where: byEmail(req.body.email) });
   if (isAdded) {
@@ -419,8 +444,8 @@ const getAllCustomers = async (req, res) => {
 
 const getCustomerById = async (req, res) => {
   try {
-    if (!isUuid(req.params.id)) {
-      return res.status(404).send({ message: "¡Cliente no encontrado!" });
+    if (!(await puedeAccederAlCliente(req, req.params.id))) {
+      return res.status(404).send(NO_AUTORIZADO);
     }
     const row = await customers().findUnique({ where: { id: req.params.id }, ...PUBLIC });
     if (!row) {
@@ -440,7 +465,7 @@ const addShippingAddress = async (req, res) => {
     const customerId = req.params.id;
     const newShippingAddress = req.body;
 
-    if (!isUuid(customerId)) {
+    if (!(await puedeAccederAlCliente(req, customerId))) {
       return res.status(404).send({ message: "Cliente no encontrado." });
     }
 
@@ -473,7 +498,7 @@ const getShippingAddress = async (req, res) => {
   try {
     const customerId = req.params.id;
 
-    if (!isUuid(customerId)) {
+    if (!(await puedeAccederAlCliente(req, customerId))) {
       return res.send({ shippingAddress: undefined });
     }
 
@@ -501,7 +526,7 @@ const getShippingAddress = async (req, res) => {
 const updateShippingAddress = async (req, res) => {
   try {
     const customerId = req.params.userId || req.params.id;
-    if (!isUuid(customerId)) {
+    if (!(await puedeAccederAlCliente(req, customerId))) {
       return res.status(404).send({ message: "Cliente no encontrado." });
     }
 
@@ -524,7 +549,7 @@ const updateShippingAddress = async (req, res) => {
 const deleteShippingAddress = async (req, res) => {
   try {
     const { userId } = req.params;
-    if (!isUuid(userId)) {
+    if (!(await puedeAccederAlCliente(req, userId))) {
       return res.status(404).send({ message: "Cliente no encontrado." });
     }
 
@@ -550,8 +575,8 @@ const updateCustomer = async (req, res) => {
   try {
     const { name, email, address, phone, image } = req.body;
 
-    if (!isUuid(req.params.id)) {
-      return res.status(404).send({ message: "¡Cliente no encontrado!" });
+    if (!(await puedeAccederAlCliente(req, req.params.id))) {
+      return res.status(404).send(NO_AUTORIZADO);
     }
     const customer = await customers().findUnique({ where: { id: req.params.id } });
     if (!customer) {
