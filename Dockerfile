@@ -1,4 +1,6 @@
-FROM node:18-slim
+# Node 22 LTS: Prisma 7 exige ^20.19 || ^22.12 || >=24. Con node:18-slim el
+# `npm ci` de abajo aborta antes de instalar nada.
+FROM node:22-slim
 
 WORKDIR /usr/src/app
 
