@@ -1,229 +1,132 @@
 # Crokete Backend
 
-Backend API para el sistema de e-commerce Crokete, desplegado en Google Cloud Run.
+API REST del e-commerce Crokete: Node.js + Express, PostgreSQL (Supabase) con Prisma.
 
-## 🚀 Despliegue Rápido
-
-### Pre-requisitos
-- Google Cloud SDK instalado y autenticado
-- Proyecto GCP: `crokete`
-- Cloud Run, Secret Manager y Cloud Build habilitados
-
-### Desplegar
-
-```bash
-# 1. Verificar secretos
-.\scripts\verify-secrets.ps1 crokete
-
-# 2. Si faltan secretos, crearlos
-.\scripts\create-missing-secrets.ps1 crokete
-
-# 3. Agregar valores a los secretos (ver docs/secrets-guide.md)
-
-# 4. Desplegar con Cloud Build
-gcloud builds submit --config=cloudbuild.yaml --project=crokete
-```
-
-### Probar Backend
-
-```bash
-# PowerShell
-.\scripts\test-backend.ps1
-
-# Bash
-chmod +x scripts/test-backend.sh
-./scripts/test-backend.sh
-```
-
-**URL de producción:** https://backend-service-704205683434.us-south1.run.app
+- **Producción:** https://backend.crokete.com.mx (Railway)
+- **Tienda:** https://crokete.com.mx (Vercel)
+- **Panel:** https://admin.crokete.com.mx (Vercel)
 
 ---
 
-## 📚 Documentación
-
-- **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** - Guía completa de despliegue y pruebas
-- **[secrets-guide.md](docs/secrets-guide.md)** - Gestión de secretos en GCP
-- **[deploy-full.md](docs/deploy-full.md)** - Despliegue de los 3 proyectos (Backend + Admin + Store)
-- **[deploy-summary.md](docs/deploy-summary.md)** - Resumen ejecutivo del despliegue
-
----
-
-## 🔐 Secretos & Variables de Entorno
-
-El backend requiere **19 secretos** en GCP Secret Manager:
-
-### Autenticación
-- `mongo-uri-secret` - MongoDB connection URI
-- `jwt-secret` - JWT para tokens de acceso
-- `jwt-secret-for-verify` - JWT para verificación de email
-- `jwt-refresh-secret` - JWT para refresh tokens
-- `encrypt-password-secret` - Clave de encriptación
-- `nextauth-secret` - Secret de NextAuth
-
-### Pagos
-- `stripe-key-secret` - Stripe publishable key
-- `stripe-secret-secret` - Stripe secret key
-- `paypal-client-id-secret` - PayPal Client ID
-- `paypal-app-secret-secret` - PayPal App Secret
-
-### Servicios Externos
-- `cloudinary-url-secret` - URL de Cloudinary
-- `email-user-secret` - Email para notificaciones
-- `email-pass-secret` - Contraseña de email
-- `twilio-sid-secret` - Twilio Account SID
-- `twilio-token-secret` - Twilio Auth Token
-
-### OAuth
-- `google-client-id-secret` - Google OAuth Client ID
-- `google-client-secret-secret` - Google OAuth Client Secret
-
-### URLs
-- `store-url-secret` - URL del frontend de la tienda
-- `admin-url-secret` - URL del panel de administración
-
-Ver [docs/secrets-guide.md](docs/secrets-guide.md) para instrucciones detalladas.
-
----
-
-## 💻 Desarrollo Local
-
-### 1. Instalar dependencias
+## 💻 Desarrollo local
 
 ```bash
 npm install
+cp .env.example .env       # y rellenar credenciales
+npm run build:ts           # genera el cliente Prisma y compila src/ → dist/
+npm run dev                # http://localhost:5055
 ```
 
-### 2. Configurar variables de entorno
+`npm run dev` necesita un `build:ts` previo: el cliente Prisma y los módulos
+TypeScript se cargan desde `dist/`, que no se versiona.
+
+### Comandos
 
 ```bash
-cp .env.example .env
-```
+npm run dev          # hot-reload (nodemon)
+npm start            # arranque de producción
+npm run build:ts     # prisma generate + tsc
+npm run typecheck    # tsc --noEmit
+npm test             # vitest
+npm run init:admin   # crear el super admin (una sola vez)
+npm run openapi:gen  # regenerar openapi.json desde los contratos zod
 
-Editar `.env` con tus credenciales locales.
-
-### 3. Iniciar servidor de desarrollo
-
-```bash
-npm run dev
-```
-
-El servidor se iniciará en `http://localhost:5055`
-
----
-
-## 🧪 Scripts Disponibles
-
-### Despliegue y Verificación
-
-```bash
-# Verificar secretos en GCP
-.\scripts\verify-secrets.ps1 crokete
-
-# Crear secretos faltantes
-.\scripts\create-missing-secrets.ps1 crokete
-
-# Probar backend desplegado
-.\scripts\test-backend.ps1
-
-# Desplegar con script bash
-chmod +x deploy.backend.sh
-./deploy.backend.sh crokete us-south1
-```
-
-### Desarrollo
-
-```bash
-# Desarrollo con hot-reload
-npm run dev
-
-# Producción local
-npm run production
-
-# Iniciar servidor
-npm start
-
-# Importar datos de prueba
-npm run data:import
-
-# Generar contraseñas
-npm run generate-password
+npx prisma migrate deploy   # aplicar migraciones pendientes
+npx prisma migrate dev      # crear una migración nueva en desarrollo
+npx prisma studio           # explorar la base de datos
 ```
 
 ---
 
-## 🏗️ Estructura del Proyecto
+## 🚀 Despliegue
+
+Railway construye la imagen desde el `Dockerfile` y despliega con cada `git push`.
+El `Dockerfile` corre `npm run build:ts` (que incluye `prisma generate`, necesario
+porque el cliente no está versionado) y luego descarta las devDependencies.
+
+Las variables de entorno se configuran en el panel de Railway — ver la lista en
+[.env.example](.env.example). El healthcheck apunta a `GET /health`, que hace un
+`SELECT 1` contra Postgres y responde 503 si la base no está accesible.
+
+Tras un cambio de esquema hay que aplicar las migraciones (`npx prisma migrate
+deploy`) contra la base de Supabase.
+
+---
+
+## 🏗️ Estructura
 
 ```
 crokete-backend/
-├── api/              # Punto de entrada de la aplicación
-├── config/           # Configuración (DB, Auth)
-├── controller/       # Controladores de rutas
-├── lib/              # Librerías (email, pagos, etc.)
-├── models/           # Modelos de MongoDB
+├── api/              # Punto de entrada (middleware, montaje de rutas)
 ├── routes/           # Definición de rutas
-├── scripts/          # Scripts de utilidad y despliegue
-├── utils/            # Funciones auxiliares
-├── docs/             # Documentación
-├── Dockerfile        # Configuración de Docker
-├── cloudbuild.yaml   # Cloud Build config
-└── package.json      # Dependencias
+├── controller/       # Controladores HTTP
+├── lib/
+│   ├── prisma/       # Cliente, presentadores y consultas compartidas
+│   ├── email-sender/ # Plantillas y envío SMTP
+│   ├── storage/      # Subida de imágenes a Supabase Storage
+│   ├── stripe/       # Pagos
+│   └── ai/           # Generación de fichas con Gemini/OpenAI
+├── prisma/           # Esquema y migraciones (fuente de verdad del modelo)
+├── src/              # Módulos TypeScript/DDD, contratos zod y OpenAPI
+├── config/           # Auth y constantes de la empresa
+├── utils/            # Caché, jerarquía de categorías, configuración
+├── scripts/          # init-super-admin
+└── docs/             # Seguridad y configuración de Stripe
 ```
 
 ---
 
-## 🔗 Enlaces Útiles
+## 🔐 Variables de entorno
 
-- **Backend API:** https://backend-service-704205683434.us-south1.run.app
-- **Admin Panel:** https://admin.crokete.com.mx
-- **Store Frontend:** https://crokete.com.mx
-- **Cloud Console:** https://console.cloud.google.com/run?project=crokete
-- **Secret Manager:** https://console.cloud.google.com/security/secret-manager?project=crokete
+Imprescindibles: `DATABASE_URL`, los tres secretos JWT, `ENCRYPT_PASSWORD`
+(32 hex, debe coincidir con `VITE_APP_ENCRYPT_PASSWORD` del panel), las claves de
+Stripe, el SMTP, `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` para las imágenes y
+`STORE_URL` + `ADMIN_URL` para CORS.
+
+La lista completa, con ejemplos y las opcionales (Gemini/OpenAI, Google OAuth,
+Twilio), está en [.env.example](.env.example).
+
+Al arrancar, `syncEnvToDb` copia a la tabla `Setting` las claves que estén vacías
+en la base, de modo que el panel pueda editarlas en caliente. Las variables de
+entorno siempre tienen prioridad sobre lo guardado en la base.
 
 ---
 
-## 🐛 Troubleshooting
+## 🐛 Diagnóstico
 
-### Backend no inicia
+El arranque imprime un resumen de configuración (Stripe, email, OAuth, Supabase
+Storage, webhook) señalando lo que falta o no concuerda.
 
-```bash
-# Ver logs
-gcloud run services logs read backend-service --region=us-south1 --limit=50
-```
+| Síntoma | Dónde mirar |
+|---|---|
+| `/health` responde 503 | `DATABASE_URL` y el estado del proyecto en Supabase |
+| Error CORS | `STORE_URL` / `ADMIN_URL` deben ser el origen exacto, sin comodines |
+| Webhooks de Stripe fallando | La URL del endpoint en el panel de Stripe y `STRIPE_WEBHOOK_SECRET` |
+| "Prisma Client no compilado" | Falta `npm run build:ts` |
 
-### Error de conexión a MongoDB
-
-```bash
-# Verificar secret
-gcloud secrets versions access latest --secret=mongo-uri-secret --project=crokete
-```
-
-### Error CORS
-
-Asegúrate de que `store-url-secret` y `admin-url-secret` tengan las URLs correctas.
-
-Ver más en [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md#-troubleshooting)
+Más detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md) y
+[docs/STRIPE_CONFIG.md](docs/STRIPE_CONFIG.md).
 
 ---
 
 ## 🔒 Seguridad
 
-- **NO** commitear archivos `.env` al repositorio
-- Rotar secretos cada 90 días
-- Usar diferentes valores entre desarrollo y producción
-- Revocar inmediatamente cualquier secreto expuesto
+- **No** commitear `.env`
+- Rotar secretos periódicamente y revocar de inmediato cualquiera que se exponga
+- Valores distintos entre desarrollo y producción
+- `SUPABASE_SERVICE_ROLE_KEY` salta las políticas RLS: nunca debe llegar al navegador
 
 ---
 
-## 📝 Tecnologías
+## 📝 Stack
 
-- Node.js 18
-- Express.js
-- MongoDB + Mongoose
-- JWT para autenticación
-- Stripe & PayPal para pagos
-- Cloudinary para imágenes
-- Socket.io para notificaciones en tiempo real
-- Cloud Run para hosting
+- Node.js 18 · Express
+- PostgreSQL (Supabase) · Prisma 7
+- TypeScript en los módulos de dominio (`src/modules`), contratos con zod
+- JWT para autenticación · AES-256-CBC para datos sensibles
+- Stripe (tarjeta) y efectivo contra entrega
+- Supabase Storage para imágenes (normalizadas a webp con sharp)
+- Railway para el hosting
 
 ---
 

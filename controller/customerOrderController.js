@@ -1,14 +1,8 @@
 require("dotenv").config();
-const crypto = require("crypto");
 const stripe = require("stripe");
-const Razorpay = require("razorpay");
 const MailChecker = require("mailchecker");
 const CONFIG = require("../config");
 
-const mongoose = require("mongoose");
-
-const Order = require("../models/Order");
-const Setting = require("../models/Setting");
 const { sendEmail, sendEmailAsync } = require("../lib/email-sender/sender");
 const { formatAmountForStripe } = require("../lib/stripe/stripe");
 const { handleCreateInvoice } = require("../lib/email-sender/create");
@@ -17,14 +11,20 @@ const customerInvoiceEmailBody = require("../lib/email-sender/templates/order-to
 const orderConfirmedEmailBody = require("../lib/email-sender/templates/order-to-customer/order-confirmed");
 const { logPaymentEvent } = require("../utils/paymentLogger");
 const { getStripeConfig } = require("../utils/getConfig");
+const { readSetting } = require("../lib/prisma/settings");
+const { getPrisma } = require("../lib/prisma");
+const { orderToApi } = require("../lib/prisma/presenters");
+const { isUuid, fail, notFound } = require("../lib/prisma/helpers");
+
+const orders = () => getPrisma().order;
 
 /**
  * Calcula el IVA incluido en el total (precio con IVA incluido).
  * taxAmount = total × taxRate / (100 + taxRate)
  */
 const calculateTax = async (total) => {
-  const globalSetting = await Setting.findOne({ name: "globalSetting" }).lean();
-  const taxRate = Number(globalSetting?.setting?.tax_rate) || 16;
+  const globalSetting = await readSetting("globalSetting");
+  const taxRate = Number(globalSetting?.tax_rate) || 16;
   const taxAmount = Math.round((total * taxRate / (100 + taxRate)) * 100) / 100;
   return { taxRate, taxAmount };
 };
@@ -34,8 +34,7 @@ const calculateTax = async (total) => {
  * Devuelve null si es válido, o un mensaje de error si no.
  */
 const validateShippingCost = async (shippingCost, shippingOption, cartTotal) => {
-  const globalSetting = await Setting.findOne({ name: "globalSetting" }).lean();
-  const s = globalSetting?.setting || {};
+  const s = (await readSetting("globalSetting")) || {};
 
   const freeThreshold = Number(s.free_shipping_threshold) || 599;
   const rate1 = Number(s.shipping_one_cost) || 0;
@@ -64,9 +63,70 @@ const validateShippingCost = async (shippingCost, shippingOption, cartTotal) => 
   return null;
 };
 
+/**
+ * Carrito de la tienda → filas de `order_items`.
+ *
+ * En Mongo el carrito era un array de documentos libres dentro del pedido. Aquí
+ * cada línea es una fila: los campos que se consultan y agregan pasan a
+ * columnas y el ítem original se guarda íntegro en `snapshot`, que es lo que la
+ * factura y el detalle del pedido siguen leyendo.
+ *
+ * El id del producto es `_id`; `id` es el identificador del carrito de la
+ * tienda, que en los productos con variante vale "<productId>-<variantId>" y
+ * por tanto no es un uuid.
+ */
+const cartToItems = (cart) =>
+  (Array.isArray(cart) ? cart : []).map((item) => {
+    const productId = [item?._id, item?.id].find(isUuid) || null;
+    const variantId = [item?.variant?._id, item?.variant?.id].find(isUuid) || null;
+    const price = Number(item?.price) || 0;
+    const quantity = Number(item?.quantity) || 0;
+    const image = Array.isArray(item?.image) ? item.image[0] : item?.image;
+
+    return {
+      productId,
+      variantId,
+      title: String(item?.title ?? ""),
+      image: image || null,
+      sku: item?.sku || null,
+      price,
+      quantity,
+      itemTotal: Number(item?.itemTotal ?? price * quantity) || 0,
+      snapshot: item ?? {},
+    };
+  });
+
+/** Campos del pedido aceptados desde el cliente (el resto del body se ignora). */
+const orderDataFromBody = (body, { customerId, taxRate, taxAmount, stripePaymentIntentId = null }) => ({
+  customerId,
+  userInfo: body.user_info ?? {},
+  subTotal: Number(body.subTotal) || 0,
+  shippingCost: Number(body.shippingCost) || 0,
+  discount: Number(body.discount) || 0,
+  taxRate,
+  taxAmount,
+  total: Number(body.total) || 0,
+  shippingOption: body.shippingOption || null,
+  paymentMethod: body.paymentMethod,
+  stripePaymentIntentId,
+  loyaltyCouponCode: body.loyaltyCouponCode || null,
+  cardInfo: body.cardInfo ?? undefined,
+  status: "pedido",
+  items: { create: cartToItems(body.cart) },
+});
+
+/** Violación de índice único en Postgres (pedido duplicado por PaymentIntent). */
+const isUniqueViolation = (err) => err?.code === "P2002";
+
 const addOrder = async (req, res) => {
   try {
     const { paymentMethod, total, subTotal, shippingCost, shippingOption, cart } = req.body;
+
+    if (!isUuid(req.user?._id)) {
+      return res.status(401).send({
+        message: "Tu sesión ha expirado. Por favor, inicia sesión nuevamente.",
+      });
+    }
 
     // Validar costo de envío contra tarifas configuradas en DB
     const cartTotal = Number(subTotal) || 0;
@@ -120,45 +180,47 @@ const addOrder = async (req, res) => {
     // Idempotency guard: if this PaymentIntent already has an order, return it instead of creating a duplicate
     const stripePaymentIntentId = req.body.stripePaymentIntentId || null;
     if (stripePaymentIntentId) {
-      const existing = await Order.findOne({ stripePaymentIntentId }).lean();
+      const existing = await orders().findUnique({
+        where: { stripePaymentIntentId },
+        include: { items: true },
+      });
       if (existing) {
-        return res.status(200).send(existing);
+        return res.status(200).send(orderToApi(existing));
       }
     }
 
-    // Get the latest invoice number
-    const lastOrder = await Order.findOne({})
-      .sort({ invoice: -1 })
-      .select("invoice")
-      .lean();
-
-    const nextInvoice = lastOrder ? lastOrder.invoice + 1 : 10000;
-
     const { taxRate, taxAmount } = await calculateTax(Number(total));
 
-    const newOrder = new Order({
-      ...req.body,
-      user: req.user._id,
-      invoice: nextInvoice,
-      stripePaymentIntentId,
-      taxRate,
-      taxAmount,
-    });
-
-    let order;
+    // El folio ya no se calcula leyendo el último pedido (dos compras
+    // simultáneas podían obtener el mismo número): lo asigna la secuencia
+    // nativa de Postgres.
+    let created;
     try {
-      order = await newOrder.save();
+      created = await orders().create({
+        data: orderDataFromBody(req.body, {
+          customerId: req.user._id,
+          taxRate,
+          taxAmount,
+          stripePaymentIntentId,
+        }),
+        include: { items: true },
+      });
     } catch (saveErr) {
-      // MongoDB duplicate key on stripePaymentIntentId — order already exists (race condition)
-      if (saveErr.code === 11000 && saveErr.keyPattern?.stripePaymentIntentId) {
-        const existing = await Order.findOne({ stripePaymentIntentId }).lean();
-        if (existing) return res.status(200).send(existing);
+      // Índice único sobre stripePaymentIntentId — el pedido ya existe (carrera)
+      if (isUniqueViolation(saveErr) && stripePaymentIntentId) {
+        const existing = await orders().findUnique({
+          where: { stripePaymentIntentId },
+          include: { items: true },
+        });
+        if (existing) return res.status(200).send(orderToApi(existing));
       }
       throw saveErr;
     }
 
+    const order = orderToApi(created);
+
     logPaymentEvent({
-      orderId: order._id,
+      orderId: created.id,
       userId: req.user._id,
       userEmail: req.body.user_info?.email,
       event: "ORDER_CREATED",
@@ -170,13 +232,15 @@ const addOrder = async (req, res) => {
     });
 
     res.status(201).send(order);
-    handleProductQuantity(order.cart);
+    // Se descuenta con el carrito tal como llegó: `_id` es el uuid del producto,
+    // mientras que en las líneas ya guardadas `_id` es el de la propia línea.
+    handleProductQuantity(cart);
 
     // Fire-and-forget order confirmation email
     (async () => {
       try {
-        const setting = await Setting.findOne({ name: "storeSetting" }).lean();
-        const currency = setting?.setting?.default_currency || "$";
+        const setting = await readSetting("storeSetting");
+        const currency = setting?.default_currency || "$";
         const user = order.user_info || {};
         // Build a readable address from the new structured fields (calle, colonia, municipio, etc.)
         // Falls back to the legacy flat "address" field if the new fields are absent.
@@ -248,7 +312,6 @@ const addOrder = async (req, res) => {
 //create payment intent for stripe
 const createPaymentIntent = async (req, res) => {
   const { total: amount, cardInfo: payment_intent, email } = req.body;
-  // console.log("req.body", req.body);
   // Validate the amount that was passed from the client.
   const min = Number(process.env.MIN_AMOUNT) || 1;
   const max = Number(process.env.MAX_AMOUNT) || 1_000_000;
@@ -289,8 +352,6 @@ const createPaymentIntent = async (req, res) => {
         return res.send(updated_intent);
       }
     } catch (err) {
-      // console.log("error", err);
-
       if (err.code !== "resource_missing") {
         const errorMessage =
           err instanceof Error ? err.message : "Internal server error";
@@ -307,11 +368,6 @@ const createPaymentIntent = async (req, res) => {
       automatic_payment_methods: {
         enabled: true,
       },
-      /* receipt_email: email,
-      metadata: {
-        orderId: new Date().getMilliseconds().toString() || "12345",
-        customerEmail: email,
-      }, */
     };
     const payment_intent = await stripeInstance.paymentIntents.create(params);
 
@@ -343,253 +399,78 @@ const createPaymentIntent = async (req, res) => {
   }
 };
 
-const createOrderByRazorPay = async (req, res) => {
-  try {
-    const storeSetting = await Setting.findOne({ name: "storeSetting" });
-    // console.log("createOrderByRazorPay", storeSetting?.setting);
-
-    const instance = new Razorpay({
-      key_id: storeSetting?.setting?.razorpay_id,
-      key_secret: storeSetting?.setting?.razorpay_secret,
-    });
-
-    const options = {
-      amount: req.body.amount * 100,
-      currency: "INR",
-    };
-    const order = await instance.orders.create(options);
-
-    if (!order)
-      return res.status(500).send({
-        message: "¡Ocurrió un error al crear el pedido!",
-      });
-    res.send(order);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
-  }
-};
-
-const addRazorpayOrder = async (req, res) => {
-  try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-
-    // Verificar firma HMAC-SHA256 de Razorpay antes de crear el pedido
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).send({ message: "Datos de verificación de pago incompletos." });
-    }
-
-    const storeSetting = await Setting.findOne({ name: "storeSetting" }).lean();
-    const razorpaySecret = storeSetting?.setting?.razorpay_secret;
-    if (!razorpaySecret) {
-      return res.status(500).send({ message: "Razorpay no está configurado." });
-    }
-
-    const expectedSignature = crypto
-      .createHmac("sha256", razorpaySecret)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest("hex");
-
-    if (expectedSignature !== razorpay_signature) {
-      logPaymentEvent({
-        userId: req.user._id,
-        userEmail: req.body.user_info?.email,
-        event: "RAZORPAY_SIGNATURE_INVALID",
-        amount: req.body.total,
-        status: "error",
-        errorMessage: "Razorpay signature mismatch",
-        req,
-      });
-      return res.status(400).send({ message: "Verificación de pago fallida." });
-    }
-
-    // Verificar contra la API de Razorpay que el pago existe, pertenece a esta
-    // orden y está CAPTURADO por el monto completo. La firma sola no garantiza
-    // que los fondos se capturaron ni el monto. (Comparamos contra la orden de
-    // Razorpay para evitar el desajuste de moneda MXN/INR; la conversión
-    // moneda↔total del pedido queda como decisión de producto — ver nota.)
-    try {
-      const instance = new Razorpay({
-        key_id: storeSetting?.setting?.razorpay_id,
-        key_secret: razorpaySecret,
-      });
-      const [payment, rzpOrder] = await Promise.all([
-        instance.payments.fetch(razorpay_payment_id),
-        instance.orders.fetch(razorpay_order_id),
-      ]);
-
-      const captured = payment?.status === "captured";
-      const belongsToOrder = payment?.order_id === razorpay_order_id;
-      const amountMatches =
-        Number(payment?.amount) === Number(rzpOrder?.amount);
-
-      if (!captured || !belongsToOrder || !amountMatches) {
-        logPaymentEvent({
-          userId: req.user._id,
-          userEmail: req.body.user_info?.email,
-          event: "RAZORPAY_PAYMENT_INVALID",
-          amount: req.body.total,
-          status: "error",
-          errorMessage: `status=${payment?.status} order=${payment?.order_id} amount=${payment?.amount}/${rzpOrder?.amount}`,
-          req,
-        });
-        return res
-          .status(400)
-          .send({ message: "El pago no pudo verificarse o está incompleto." });
-      }
-    } catch (verifyErr) {
-      logPaymentEvent({
-        userId: req.user._id,
-        userEmail: req.body.user_info?.email,
-        event: "RAZORPAY_VERIFY_ERROR",
-        amount: req.body.total,
-        status: "error",
-        errorMessage: verifyErr.message,
-        req,
-      });
-      return res
-        .status(400)
-        .send({ message: "No se pudo verificar el pago con Razorpay." });
-    }
-
-    // Validar costo de envío
-    const shippingError = await validateShippingCost(
-      req.body.shippingCost,
-      req.body.shippingOption,
-      Number(req.body.subTotal) || 0
-    );
-    if (shippingError) return res.status(400).send({ message: shippingError });
-
-    const { taxRate, taxAmount } = await calculateTax(Number(req.body.total) || 0);
-
-    const newOrder = new Order({
-      ...req.body,
-      user: req.user._id,
-      taxRate,
-      taxAmount,
-    });
-    const order = await newOrder.save();
-    res.status(201).send(order);
-    handleProductQuantity(order.cart);
-  } catch (err) {
-    res.status(500).send({ message: err.message });
-  }
-};
-
 // get all orders user
 const getOrderCustomer = async (req, res) => {
   try {
-    // console.log("getOrderCustomer", req.user);
     const { page, limit } = req.query;
 
     const pages = Number(page) || 1;
     const limits = Number(limit) || 8;
     const skip = (pages - 1) * limits;
 
-    const userId = new mongoose.Types.ObjectId(req.user._id);
+    if (!isUuid(req.user?._id)) {
+      return res.status(401).send({
+        message: "Tu sesión ha expirado. Por favor, inicia sesión nuevamente.",
+      });
+    }
+    const where = { customerId: req.user._id };
 
-    const totalDoc = await Order.countDocuments({ user: userId });
+    const countByStatus = (status) =>
+      orders().count({ where: { ...where, status } });
 
-    // total pedido order count
-    const totalPendingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: { $regex: `pedido`, $options: "i" },
-          user: userId,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
+    const [totalDoc, pendiente, procesando, entregado, rows] = await Promise.all([
+      orders().count({ where }),
+      countByStatus("pedido"),
+      countByStatus("empaquetado"),
+      countByStatus("entregado"),
+      orders().findMany({
+        where,
+        include: { items: true },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limits,
+      }),
     ]);
-
-    // total empaquetado order count
-    const totalProcessingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: { $regex: `empaquetado`, $options: "i" },
-          user: userId,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    const totalDeliveredOrder = await Order.aggregate([
-      {
-        $match: {
-          status: { $regex: `entregado`, $options: "i" },
-          user: userId,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    // today order amount
-
-    // query for orders
-    const orders = await Order.find({ user: req.user._id })
-      .sort({ _id: -1 })
-      .skip(skip)
-      .limit(limits);
 
     res.send({
-      orders,
+      orders: rows.map(orderToApi),
       limits,
       pages,
-      pendiente: totalPendingOrder.length === 0 ? 0 : totalPendingOrder[0].count,
-      procesando:
-        totalProcessingOrder.length === 0 ? 0 : totalProcessingOrder[0].count,
-      entregado:
-        totalDeliveredOrder.length === 0 ? 0 : totalDeliveredOrder[0].count,
-
+      pendiente,
+      procesando,
+      entregado,
       totalDoc,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getOrderById = async (req, res) => {
   try {
-    // console.log("getOrderById");
-    const order = await Order.findById(req.params.id);
-    res.send(order);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Pedido no encontrado");
+
+    const order = await orders().findUnique({
+      where: { id: req.params.id },
+      include: { items: true },
     });
+    if (!order) return notFound(res, "Pedido no encontrado");
+
+    // El pedido sólo lo ve su dueño: antes bastaba con conocer el id para leer
+    // los datos de contacto y envío de cualquier cliente.
+    if (order.customerId !== req.user?._id) {
+      return notFound(res, "Pedido no encontrado");
+    }
+
+    res.send(orderToApi(order));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const sendEmailInvoiceToCustomer = async (req, res) => {
   try {
     const user = req.body.user_info;
-    // Validate email using MailChecker
     // Validate email using MailChecker
     if (!MailChecker.isValid(user?.email)) {
       // Return a response indicating invalid email instead of using process.exit
@@ -598,7 +479,6 @@ const sendEmailInvoiceToCustomer = async (req, res) => {
           "Invalid or disposable email address. Please provide a valid email.",
       });
     }
-    // console.log("sendEmailInvoiceToCustomer");
     const pdf = await handleCreateInvoice(req.body, `${req.body.invoice}.pdf`);
 
     const option = {
@@ -654,7 +534,5 @@ module.exports = {
   getOrderById,
   getOrderCustomer,
   createPaymentIntent,
-  createOrderByRazorPay,
-  addRazorpayOrder,
   sendEmailInvoiceToCustomer,
 };

@@ -1,36 +1,49 @@
-const VetConfig = require("../models/VetConfig");
+const { getPrisma } = require("../lib/prisma");
+const { vetConfigToApi } = require("../lib/prisma/presenters");
+const { fail } = require("../lib/prisma/helpers");
 
 // ==========================================
 // HELPERS
 // ==========================================
 
+const DEFAULT_DURATIONS = [
+  { minutes: 15, label: "15 minutos", price: 200 },
+  { minutes: 30, label: "30 minutos", price: 350 },
+  { minutes: 60, label: "60 minutos", price: 600 },
+];
+
+const DEFAULT_TIERS = [
+  { minSpent: 3000, discountPercent: 10, label: "Cliente Frecuente - 10%" },
+  { minSpent: 8000, discountPercent: 20, label: "Cliente Premium - 20%" },
+  { minSpent: 15000, discountPercent: 30, label: "Cliente VIP - 30%" },
+];
+
+/**
+ * Fila única de configuración. Se devuelve ya presentada (`workingHours`
+ * reagrupado y Decimal → número), que es como la consumen los controladores.
+ */
 const getOrCreateConfig = async () => {
-  let config = await VetConfig.findOne();
-  if (!config) {
-    config = await VetConfig.create({
+  const existing = await getPrisma().vetConfig.findFirst();
+  if (existing) return vetConfigToApi(existing);
+
+  const created = await getPrisma().vetConfig.create({
+    data: {
       enabled: false,
-      durations: [
-        { minutes: 15, label: "15 minutos", price: 200 },
-        { minutes: 30, label: "30 minutos", price: 350 },
-        { minutes: 60, label: "60 minutos", price: 600 },
-      ],
-      discountTiers: [
-        { minSpent: 3000, discountPercent: 10, label: "Cliente Frecuente - 10%" },
-        { minSpent: 8000, discountPercent: 20, label: "Cliente Premium - 20%" },
-        { minSpent: 15000, discountPercent: 30, label: "Cliente VIP - 30%" },
-      ],
+      durations: DEFAULT_DURATIONS,
+      discountTiers: DEFAULT_TIERS,
       freeThreshold: 0,
       advanceBookingDays: 30,
       minBookingHoursAhead: 24,
       videoPlatform: "jitsi",
-      workingHours: { start: "09:00", end: "18:00" },
+      workingHoursStart: "09:00",
+      workingHoursEnd: "18:00",
       workingDays: [1, 2, 3, 4, 5],
       cancellationHoursLimit: 12,
       maxDailyConsultations: 20,
       customerInstructions: "",
-    });
-  }
-  return config;
+    },
+  });
+  return vetConfigToApi(created);
 };
 
 // ==========================================
@@ -60,7 +73,7 @@ const getPublicVetConfig = async (req, res) => {
       customerInstructions: config.customerInstructions,
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -71,44 +84,50 @@ const getPublicVetConfig = async (req, res) => {
 // GET /vet/config
 const getVetConfig = async (req, res) => {
   try {
-    const config = await getOrCreateConfig();
-    res.status(200).send(config);
+    res.status(200).send(await getOrCreateConfig());
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
+
+/** Campos que el panel puede escribir tal cual. */
+const EDITABLE = [
+  "enabled",
+  "durations",
+  "discountTiers",
+  "freeThreshold",
+  "advanceBookingDays",
+  "minBookingHoursAhead",
+  "videoPlatform",
+  "workingDays",
+  "cancellationHoursLimit",
+  "maxDailyConsultations",
+  "customerInstructions",
+];
 
 // PUT /vet/config
 const updateVetConfig = async (req, res) => {
   try {
-    const config = await getOrCreateConfig();
+    const current = await getOrCreateConfig();
     const updates = req.body;
 
-    const allowedFields = [
-      "enabled",
-      "durations",
-      "discountTiers",
-      "freeThreshold",
-      "advanceBookingDays",
-      "minBookingHoursAhead",
-      "videoPlatform",
-      "workingHours",
-      "workingDays",
-      "cancellationHoursLimit",
-      "maxDailyConsultations",
-      "customerInstructions",
-    ];
-
-    for (const field of allowedFields) {
-      if (updates[field] !== undefined) {
-        config[field] = updates[field];
-      }
+    const data = {};
+    for (const field of EDITABLE) {
+      if (updates[field] !== undefined) data[field] = updates[field];
+    }
+    // El panel sigue enviando el subdocumento `workingHours`.
+    if (updates.workingHours !== undefined) {
+      const { start, end } = updates.workingHours || {};
+      if (start !== undefined) data.workingHoursStart = start;
+      if (end !== undefined) data.workingHoursEnd = end;
     }
 
-    await config.save();
+    const config = vetConfigToApi(
+      await getPrisma().vetConfig.update({ where: { id: current._id }, data })
+    );
     res.status(200).send({ message: "Configuración veterinaria actualizada", config });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 

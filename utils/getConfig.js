@@ -7,7 +7,7 @@
  * should call these helpers instead of reading env/DB directly.
  */
 require("dotenv").config();
-const Setting = require("../models/Setting");
+const { readSetting, mergeSetting } = require("../lib/prisma/settings");
 
 // Cache DB setting for 60s to avoid repeated queries within the same process
 let _cache = { data: null, ts: 0 };
@@ -16,8 +16,7 @@ const CACHE_TTL = 60_000;
 const getStoreSetting = async () => {
   const now = Date.now();
   if (_cache.data && now - _cache.ts < CACHE_TTL) return _cache.data;
-  const doc = await Setting.findOne({ name: "storeSetting" }).lean();
-  _cache = { data: doc?.setting || {}, ts: now };
+  _cache = { data: (await readSetting("storeSetting")) || {}, ts: now };
   return _cache.data;
 };
 
@@ -149,11 +148,12 @@ const printConfigDiagnostics = async () => {
     console.log("  ⚠️  Google OAuth: not configured");
   }
 
-  // --- Cloudinary ---
-  if (process.env.CLOUDINARY_URL) {
-    console.log("  ✅ Cloudinary: configured — source: .env");
+  // --- Almacenamiento de imágenes (Supabase Storage) ---
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET || "crokete";
+    console.log(`  ✅ Supabase Storage: configurado (bucket: ${bucket})`);
   } else {
-    console.log("  ⚠️  Cloudinary: not configured");
+    console.log("  ⚠️  Supabase Storage: sin configurar — no se podrán subir imágenes");
   }
 
   // --- Webhook ---
@@ -187,17 +187,13 @@ const syncEnvToDb = async () => {
 
   for (const [dbField, envValue] of Object.entries(fieldsToSync)) {
     if (envValue && !db[dbField]) {
-      updates[`setting.${dbField}`] = envValue;
+      updates[dbField] = envValue;
       synced.push(dbField);
     }
   }
 
   if (Object.keys(updates).length > 0) {
-    await Setting.findOneAndUpdate(
-      { name: "storeSetting" },
-      { $set: updates },
-      { new: true }
-    );
+    await mergeSetting("storeSetting", updates);
     invalidateConfigCache();
     console.log(`  🔄 Synced ENV → DB: ${synced.join(", ")}`);
   }
@@ -234,9 +230,10 @@ const getConfigStatus = async () => {
       service: process.env.SERVICE || null,
       user: process.env.EMAIL_USER || null,
     },
-    cloudinary: {
-      source: process.env.CLOUDINARY_URL ? ".env" : "none",
-      configured: !!process.env.CLOUDINARY_URL,
+    storage: {
+      source: process.env.SUPABASE_URL ? ".env" : "none",
+      configured: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+      bucket: process.env.SUPABASE_STORAGE_BUCKET || "crokete",
     },
     google_oauth: {
       source: process.env.GOOGLE_CLIENT_ID ? ".env" : db.google_id ? "database" : "none",

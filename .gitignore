@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 /.claude/skills/
 /.windsurf/
 /skills-lock.json
+
+# Supabase CLI (proyecto vinculado local, no versionable)
+supabase/.temp/

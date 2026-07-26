@@ -7,7 +7,7 @@ import type { Product } from "../entities/Product";
  * touching domain or application code.
  */
 export interface IProductRepository {
-  /** Generates a new persistence identity (Mongo ObjectId hex string). */
+  /** Generates a new persistence identity (uuid, como la clave primaria). */
   nextIdentity(): string;
 
   findById(id: string): Promise<Product | null>;

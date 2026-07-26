@@ -171,7 +171,7 @@ const forgetPassword = async (req, res) => {
   } else {
     const token = tokenForVerify(isAdded);
     const resetUrl = process.env.ADMIN_URL + '/reset-password/' + token;
-    const logo = CONFIG.CLOUDINARY.getImageUrl(CONFIG.CLOUDINARY.IMAGES.LOGO);
+    const logo = CONFIG.ASSETS.LOGO;
     const company = CONFIG.COMPANY.NAME;
     const year = new Date().getFullYear();
     const bc = '#3B82F6';

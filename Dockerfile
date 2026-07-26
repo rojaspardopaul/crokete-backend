@@ -10,13 +10,15 @@ RUN npm ci --no-audit --no-fund
 # Copy source with correct ownership so non-root user can read files
 COPY --chown=node:node . .
 
-# Compile the TypeScript reference modules (src/ -> dist/) used by the catalog
-# module when USE_TS_CATALOG=true. Then drop devDependencies to slim the image.
+# Genera el cliente Prisma y compila los módulos TypeScript (src/ -> dist/).
+# `src/generated/prisma` no se versiona, así que el cliente TIENE que generarse
+# aquí: sin eso, tsc no encontraría qué compilar. Después se descartan las
+# devDependencies para adelgazar la imagen.
 RUN npm run build:ts
 RUN npm prune --omit=dev
 
-# Platform (Cloud Run, Railway, etc.) injects PORT at runtime; api/index.js
-# falls back to 5000 if unset. EXPOSE is documentation only, not a hard bind.
+# Railway inyecta PORT en tiempo de ejecución; api/index.js cae a 5000 si falta.
+# EXPOSE es documentación, no una restricción.
 ENV NODE_ENV=production
 EXPOSE 8080
 

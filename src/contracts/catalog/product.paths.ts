@@ -1,5 +1,5 @@
 import { registry, z } from "../openapi";
-import { ErrorResponseSchema, ObjectIdSchema } from "../shared";
+import { ErrorResponseSchema, IdSchema } from "../shared";
 import {
   ProductDTOSchema,
   CreateProductDTOSchema,
@@ -90,7 +90,7 @@ export function registerProductPaths(): void {
     tags: ["Catalog"],
     summary: "Update a product",
     request: {
-      params: z.object({ id: ObjectIdSchema }),
+      params: z.object({ id: IdSchema }),
       body: {
         content: {
           "application/json": { schema: UpdateProductDTOSchema },
@@ -121,7 +121,7 @@ export function registerProductPaths(): void {
     path: "/products/{id}",
     tags: ["Catalog"],
     summary: "Delete a product",
-    request: { params: z.object({ id: ObjectIdSchema }) },
+    request: { params: z.object({ id: IdSchema }) },
     responses: {
       200: {
         description: "Deleted",

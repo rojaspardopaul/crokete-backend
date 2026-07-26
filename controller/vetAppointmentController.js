@@ -1,12 +1,25 @@
-const VetAppointment = require("../models/VetAppointment");
-const CustomerPet = require("../models/CustomerPet");
-const Veterinarian = require("../models/Veterinarian");
-const Customer = require("../models/Customer");
 const { getOrCreateConfig } = require("./vetConfigController");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const vetAppointmentEmail = require("../lib/email-sender/templates/vet-appointment");
 const CONFIG = require("../config");
+const { getPrisma } = require("../lib/prisma");
+const { toApi, num, vetAppointmentToApi } = require("../lib/prisma/presenters");
+const { isUuid, fail, notFound } = require("../lib/prisma/helpers");
+
+const appointments = () => getPrisma().vetAppointment;
+const pets = () => getPrisma().customerPet;
+
+/** Estados que no ocupan agenda. */
+const INACTIVE_STATUSES = ["cancelled", "rejected", "no_show"];
+
+/** Relaciones que acompañan a la cita en cada vista. */
+const VET_BRIEF = { id: true, name: true, specialties: true, image: true };
+const PET_BRIEF = { id: true, name: true, species: true, breed: true, image: true };
+const PET_FULL = {
+  id: true, name: true, species: true, breed: true,
+  age: true, weight: true, gender: true, image: true, notes: true,
+};
 
 // ==========================================
 // HELPERS
@@ -73,27 +86,29 @@ const calculateDiscount = (totalSpent, discountTiers, freeThreshold) => {
   return 0; // No discount
 };
 
+/** Añade una entrada a la bitácora de estados sin perder las anteriores. */
+const appendHistory = (appointment, entry) => [
+  ...(Array.isArray(appointment.statusHistory) ? appointment.statusHistory : []),
+  entry,
+];
+
 // Check if a time slot is available for a vet
 const isSlotAvailable = async (vetId, date, durationMinutes) => {
   const startTime = new Date(date);
   const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
 
-  // Find overlapping appointments
-  const overlapping = await VetAppointment.findOne({
-    veterinarian: vetId,
-    date: {
-      $lt: endTime,
-    },
-    status: { $nin: ["cancelled", "rejected", "no_show"] },
-    $expr: {
-      $gt: [
-        { $add: ["$date", { $multiply: ["$duration", 60000] }] },
-        startTime,
-      ],
-    },
-  });
+  // El solape se calcula en SQL: el fin de una cita es `date + duration`, un
+  // valor derivado que no existe como columna y que Prisma no puede comparar.
+  const rows = await getPrisma().$queryRaw`
+    SELECT 1
+    FROM vet_appointments
+    WHERE "veterinarianId" = ${vetId}::uuid
+      AND status NOT IN ('cancelled', 'rejected', 'no_show')
+      AND date < ${endTime}
+      AND date + (duration * interval '1 minute') > ${startTime}
+    LIMIT 1`;
 
-  return !overlapping;
+  return rows.length === 0;
 };
 
 // ==========================================
@@ -107,15 +122,18 @@ const getMyPets = async (req, res) => {
     if (!config.enabled) {
       return res.status(200).send({ enabled: false, pets: [] });
     }
+    if (!isUuid(req.user._id)) {
+      return res.status(200).send({ enabled: true, pets: [] });
+    }
 
-    const pets = await CustomerPet.find({
-      customer: req.user._id,
-      status: "active",
-    }).sort({ createdAt: -1 });
+    const rows = await pets().findMany({
+      where: { customerId: req.user._id, status: "active" },
+      orderBy: { createdAt: "desc" },
+    });
 
-    res.status(200).send({ enabled: true, pets });
+    res.status(200).send({ enabled: true, pets: rows.map(toApi) });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -137,79 +155,81 @@ const createMyPet = async (req, res) => {
         .status(400)
         .send({ message: "Nombre y especie son requeridos" });
     }
+    if (!isUuid(req.user._id)) {
+      return res.status(401).send({ message: "Sesión inválida" });
+    }
 
-    const pet = await CustomerPet.create({
-      customer: req.user._id,
-      name,
-      species,
-      breed,
-      age,
-      weight,
-      gender,
-      image,
-      notes,
+    const pet = await pets().create({
+      data: {
+        customerId: req.user._id,
+        name,
+        species,
+        breed: breed ?? undefined,
+        age: age !== undefined && age !== null && age !== "" ? Number(age) : null,
+        weight: weight !== undefined && weight !== null && weight !== "" ? Number(weight) : null,
+        gender: gender || null,
+        image,
+        notes: notes ?? undefined,
+      },
     });
 
-    res.status(201).send({ message: "Mascota registrada", pet });
+    res.status(201).send({ message: "Mascota registrada", pet: toApi(pet) });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
+
+/** Campos que el dueño puede editar de su mascota. */
+const PET_EDITABLE = ["name", "species", "breed", "gender", "image", "notes"];
 
 // PUT /vet/my-pets/:id
 const updateMyPet = async (req, res) => {
   try {
-    const pet = await CustomerPet.findOne({
-      _id: req.params.id,
-      customer: req.user._id,
+    if (!isUuid(req.params.id) || !isUuid(req.user._id)) {
+      return notFound(res, "Mascota no encontrada");
+    }
+
+    const data = {};
+    for (const field of PET_EDITABLE) {
+      if (req.body[field] !== undefined) data[field] = req.body[field];
+    }
+    if (req.body.age !== undefined) {
+      data.age = req.body.age === null || req.body.age === "" ? null : Number(req.body.age);
+    }
+    if (req.body.weight !== undefined) {
+      data.weight = req.body.weight === null || req.body.weight === "" ? null : Number(req.body.weight);
+    }
+
+    // El filtro incluye al dueño: nadie puede editar la mascota de otro.
+    const updated = await pets().updateMany({
+      where: { id: req.params.id, customerId: req.user._id },
+      data,
     });
+    if (updated.count === 0) return notFound(res, "Mascota no encontrada");
 
-    if (!pet) {
-      return res.status(404).send({ message: "Mascota no encontrada" });
-    }
-
-    const allowedFields = [
-      "name",
-      "species",
-      "breed",
-      "age",
-      "weight",
-      "gender",
-      "image",
-      "notes",
-    ];
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        pet[field] = req.body[field];
-      }
-    }
-
-    await pet.save();
-    res.status(200).send({ message: "Mascota actualizada", pet });
+    const pet = await pets().findUnique({ where: { id: req.params.id } });
+    res.status(200).send({ message: "Mascota actualizada", pet: toApi(pet) });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 // DELETE /vet/my-pets/:id (soft delete)
 const deleteMyPet = async (req, res) => {
   try {
-    const pet = await CustomerPet.findOne({
-      _id: req.params.id,
-      customer: req.user._id,
-    });
-
-    if (!pet) {
-      return res.status(404).send({ message: "Mascota no encontrada" });
+    if (!isUuid(req.params.id) || !isUuid(req.user._id)) {
+      return notFound(res, "Mascota no encontrada");
     }
 
-    pet.status = "inactive";
-    await pet.save();
+    const updated = await pets().updateMany({
+      where: { id: req.params.id, customerId: req.user._id },
+      data: { status: "inactive" },
+    });
+    if (updated.count === 0) return notFound(res, "Mascota no encontrada");
 
     res.status(200).send({ message: "Mascota eliminada" });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -226,44 +246,66 @@ const getMyAppointments = async (req, res) => {
     }
 
     const { status, page = 1, limit = 20 } = req.query;
-    const pages = Number(page);
-    const limits = Number(limit);
+    const pages = Number(page) || 1;
+    const limits = Number(limit) || 20;
 
-    const filter = { customer: req.user._id };
-    if (status) filter.status = status;
+    if (!isUuid(req.user._id)) {
+      return res
+        .status(200)
+        .send({ enabled: true, appointments: [], totalDoc: 0, limits, pages });
+    }
 
-    const appointments = await VetAppointment.find(filter)
-      .populate("veterinarian", "name specialties image")
-      .populate("customerPet", "name species breed image")
-      .sort({ date: -1 })
-      .skip((pages - 1) * limits)
-      .limit(limits);
+    const where = { customerId: req.user._id };
+    if (status) where.status = status;
 
-    const totalDoc = await VetAppointment.countDocuments(filter);
+    const [rows, totalDoc] = await Promise.all([
+      appointments().findMany({
+        where,
+        include: {
+          veterinarian: { select: VET_BRIEF },
+          customerPet: { select: PET_BRIEF },
+        },
+        orderBy: { date: "desc" },
+        skip: (pages - 1) * limits,
+        take: limits,
+      }),
+      appointments().count({ where }),
+    ]);
 
-    res.status(200).send({ enabled: true, appointments, totalDoc, limits, pages });
+    res.status(200).send({
+      enabled: true,
+      appointments: rows.map(vetAppointmentToApi),
+      totalDoc,
+      limits,
+      pages,
+    });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 // GET /vet/my-appointments/:id
 const getMyAppointment = async (req, res) => {
   try {
-    const appointment = await VetAppointment.findOne({
-      _id: req.params.id,
-      customer: req.user._id,
-    })
-      .populate("veterinarian", "name specialties image bio email")
-      .populate("customerPet", "name species breed age weight gender image notes");
-
-    if (!appointment) {
-      return res.status(404).send({ message: "Cita no encontrada" });
+    if (!isUuid(req.params.id) || !isUuid(req.user._id)) {
+      return notFound(res, "Cita no encontrada");
     }
 
-    res.status(200).send(appointment);
+    const appointment = await appointments().findFirst({
+      where: { id: req.params.id, customerId: req.user._id },
+      include: {
+        veterinarian: {
+          select: { ...VET_BRIEF, bio: true, email: true },
+        },
+        customerPet: { select: PET_FULL },
+      },
+    });
+
+    if (!appointment) return notFound(res, "Cita no encontrada");
+
+    res.status(200).send(vetAppointmentToApi(appointment));
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -287,6 +329,12 @@ const requestAppointment = async (req, res) => {
           "veterinarianId, customerPetId, date, duration y reason son requeridos",
       });
     }
+    if (!isUuid(veterinarianId) || !isUuid(customerPetId)) {
+      return res.status(400).send({ message: "Veterinario o mascota no válidos" });
+    }
+    if (!isUuid(req.user._id)) {
+      return res.status(401).send({ message: "Sesión inválida" });
+    }
 
     // Validate duration is in config
     const durationOption = config.durations.find(
@@ -299,7 +347,9 @@ const requestAppointment = async (req, res) => {
     }
 
     // Validate vet exists and is active
-    const vet = await Veterinarian.findById(veterinarianId);
+    const vet = await getPrisma().veterinarian.findUnique({
+      where: { id: veterinarianId },
+    });
     if (!vet || vet.status !== "active") {
       return res
         .status(400)
@@ -307,10 +357,8 @@ const requestAppointment = async (req, res) => {
     }
 
     // Validate pet belongs to customer
-    const pet = await CustomerPet.findOne({
-      _id: customerPetId,
-      customer: req.user._id,
-      status: "active",
+    const pet = await pets().findFirst({
+      where: { id: customerPetId, customerId: req.user._id, status: "active" },
     });
     if (!pet) {
       return res
@@ -366,9 +414,11 @@ const requestAppointment = async (req, res) => {
     const endOfDay = new Date(appointmentDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const dailyCount = await VetAppointment.countDocuments({
-      date: { $gte: startOfDay, $lte: endOfDay },
-      status: { $nin: ["cancelled", "rejected"] },
+    const dailyCount = await appointments().count({
+      where: {
+        date: { gte: startOfDay, lte: endOfDay },
+        status: { notIn: ["cancelled", "rejected"] },
+      },
     });
 
     if (dailyCount >= config.maxDailyConsultations) {
@@ -378,8 +428,10 @@ const requestAppointment = async (req, res) => {
     }
 
     // Calculate pricing
-    const customer = await Customer.findById(req.user._id);
-    const totalSpent = customer?.loyalty?.totalSpent || 0;
+    const customer = await getPrisma().customer.findUnique({
+      where: { id: req.user._id },
+    });
+    const totalSpent = num(customer?.loyaltyTotalSpent);
     const discountPercent = calculateDiscount(
       totalSpent,
       config.discountTiers,
@@ -391,36 +443,40 @@ const requestAppointment = async (req, res) => {
     );
 
     // Create appointment
-    const appointment = await VetAppointment.create({
-      customer: req.user._id,
-      veterinarian: veterinarianId,
-      customerPet: customerPetId,
-      date: appointmentDate,
-      duration: durationOption.minutes,
-      reason,
-      symptoms: symptoms || [],
-      originalPrice,
-      discountPercent,
-      finalPrice,
-      status: "requested",
-      meetingPlatform: config.videoPlatform,
-      statusHistory: [
-        {
-          status: "requested",
-          changedAt: new Date(),
-          changedBy: "customer",
-          note: "Solicitud de consulta creada",
-        },
-      ],
+    const created = await appointments().create({
+      data: {
+        customerId: req.user._id,
+        veterinarianId,
+        customerPetId,
+        date: appointmentDate,
+        duration: durationOption.minutes,
+        reason,
+        symptoms: symptoms || [],
+        originalPrice,
+        discountPercent,
+        finalPrice,
+        status: "requested",
+        meetingPlatform: config.videoPlatform,
+        statusHistory: [
+          {
+            status: "requested",
+            changedAt: new Date().toISOString(),
+            changedBy: "customer",
+            note: "Solicitud de consulta creada",
+          },
+        ],
+      },
+      include: {
+        veterinarian: { select: VET_BRIEF },
+        customerPet: { select: PET_BRIEF },
+      },
     });
-
-    await appointment.populate("veterinarian", "name specialties image");
-    await appointment.populate("customerPet", "name species breed image");
+    const appointment = vetAppointmentToApi(created);
 
     // Send email notification (fire-and-forget)
     sendVetNotificationEmail({
-      name: customer.name,
-      email: customer.email,
+      name: customer?.name,
+      email: customer?.email,
       status: "requested",
       petName: appointment.customerPet?.name,
       vetName: appointment.veterinarian?.name,
@@ -435,7 +491,7 @@ const requestAppointment = async (req, res) => {
       appointment,
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -443,16 +499,17 @@ const requestAppointment = async (req, res) => {
 const cancelMyAppointment = async (req, res) => {
   try {
     const config = await getOrCreateConfig();
-    const appointment = await VetAppointment.findOne({
-      _id: req.params.id,
-      customer: req.user._id,
-    });
-
-    if (!appointment) {
-      return res.status(404).send({ message: "Cita no encontrada" });
+    if (!isUuid(req.params.id) || !isUuid(req.user._id)) {
+      return notFound(res, "Cita no encontrada");
     }
 
-    if (["completed", "cancelled", "rejected", "no_show"].includes(appointment.status)) {
+    const current = await appointments().findFirst({
+      where: { id: req.params.id, customerId: req.user._id },
+    });
+
+    if (!current) return notFound(res, "Cita no encontrada");
+
+    if (["completed", "cancelled", "rejected", "no_show"].includes(current.status)) {
       return res
         .status(400)
         .send({ message: "Esta cita no puede ser cancelada" });
@@ -460,32 +517,38 @@ const cancelMyAppointment = async (req, res) => {
 
     // Check cancellation time limit
     const hoursUntil =
-      (new Date(appointment.date).getTime() - Date.now()) / 3600000;
+      (new Date(current.date).getTime() - Date.now()) / 3600000;
     if (
       hoursUntil < config.cancellationHoursLimit &&
-      appointment.status !== "requested"
+      current.status !== "requested"
     ) {
       return res.status(400).send({
         message: `Solo se puede cancelar con al menos ${config.cancellationHoursLimit} horas de anticipación`,
       });
     }
 
-    appointment.status = "cancelled";
-    appointment.cancelledBy = "customer";
-    appointment.cancellationReason = req.body.reason || "";
-    appointment.statusHistory.push({
-      status: "cancelled",
-      changedAt: new Date(),
-      changedBy: "customer",
-      note: req.body.reason || "Cancelada por el cliente",
+    const updated = await appointments().update({
+      where: { id: current.id },
+      data: {
+        status: "cancelled",
+        cancelledBy: "customer",
+        cancellationReason: req.body.reason || "",
+        statusHistory: appendHistory(current, {
+          status: "cancelled",
+          changedAt: new Date().toISOString(),
+          changedBy: "customer",
+          note: req.body.reason || "Cancelada por el cliente",
+        }),
+      },
+      include: {
+        customer: { select: { id: true, name: true, email: true } },
+        veterinarian: { select: { id: true, name: true } },
+        customerPet: { select: { id: true, name: true } },
+      },
     });
-
-    await appointment.save();
+    const appointment = vetAppointmentToApi(updated);
 
     // Send cancellation email (fire-and-forget)
-    await appointment.populate("customer", "name email");
-    await appointment.populate("veterinarian", "name");
-    await appointment.populate("customerPet", "name");
     sendVetNotificationEmail({
       name: appointment.customer?.name,
       email: appointment.customer?.email,
@@ -500,8 +563,18 @@ const cancelMyAppointment = async (req, res) => {
 
     res.status(200).send({ message: "Cita cancelada", appointment });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
+};
+
+/** Horario del día: el del veterinario si lo tiene, si no el global. */
+const workingHoursFor = (vet, dayOfWeek, config) => {
+  const vetSlot = (Array.isArray(vet.availability) ? vet.availability : []).find(
+    (s) => s.dayOfWeek === dayOfWeek
+  );
+  return vetSlot
+    ? { start: vetSlot.start, end: vetSlot.end }
+    : { start: config.workingHours.start, end: config.workingHours.end };
 };
 
 // GET /vet/available-slots — Get available time slots for a date + vet
@@ -529,7 +602,9 @@ const getAvailableSlots = async (req, res) => {
         .send({ message: "Duración no válida" });
     }
 
-    const vet = await Veterinarian.findById(veterinarianId);
+    const vet = isUuid(veterinarianId)
+      ? await getPrisma().veterinarian.findUnique({ where: { id: veterinarianId } })
+      : null;
     if (!vet || vet.status !== "active") {
       return res
         .status(400)
@@ -544,17 +619,7 @@ const getAvailableSlots = async (req, res) => {
     }
 
     // Determine working hours (vet-specific or global)
-    let startHour, endHour;
-    const vetSlot = (vet.availability || []).find(
-      (s) => s.dayOfWeek === dayOfWeek
-    );
-    if (vetSlot) {
-      startHour = vetSlot.start;
-      endHour = vetSlot.end;
-    } else {
-      startHour = config.workingHours.start;
-      endHour = config.workingHours.end;
-    }
+    const { start: startHour, end: endHour } = workingHoursFor(vet, dayOfWeek, config);
 
     // Generate time slots
     const [startH, startM] = startHour.split(":").map(Number);
@@ -575,11 +640,14 @@ const getAvailableSlots = async (req, res) => {
     const dayEnd = new Date(targetDate);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const existingAppointments = await VetAppointment.find({
-      veterinarian: veterinarianId,
-      date: { $gte: dayStart, $lte: dayEnd },
-      status: { $nin: ["cancelled", "rejected", "no_show"] },
-    }).select("date duration");
+    const existingAppointments = await appointments().findMany({
+      where: {
+        veterinarianId,
+        date: { gte: dayStart, lte: dayEnd },
+        status: { notIn: INACTIVE_STATUSES },
+      },
+      select: { date: true, duration: true },
+    });
 
     let current = new Date(slotStart);
     while (current.getTime() + durationMs <= slotEnd.getTime()) {
@@ -616,7 +684,7 @@ const getAvailableSlots = async (req, res) => {
 
     res.status(200).send({ enabled: true, slots });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -644,7 +712,9 @@ const getAvailableDates = async (req, res) => {
       return res.status(400).send({ message: "Duración no válida" });
     }
 
-    const vet = await Veterinarian.findById(veterinarianId);
+    const vet = isUuid(veterinarianId)
+      ? await getPrisma().veterinarian.findUnique({ where: { id: veterinarianId } })
+      : null;
     if (!vet || vet.status !== "active") {
       return res.status(400).send({ message: "Veterinario no disponible" });
     }
@@ -665,11 +735,14 @@ const getAvailableDates = async (req, res) => {
     const monthStart = new Date(year, mon, 1);
     const monthEnd = new Date(year, mon + 1, 0, 23, 59, 59, 999);
 
-    const existingAppointments = await VetAppointment.find({
-      veterinarian: veterinarianId,
-      date: { $gte: monthStart, $lte: monthEnd },
-      status: { $nin: ["cancelled", "rejected", "no_show"] },
-    }).select("date duration");
+    const existingAppointments = await appointments().findMany({
+      where: {
+        veterinarianId,
+        date: { gte: monthStart, lte: monthEnd },
+        status: { notIn: INACTIVE_STATUSES },
+      },
+      select: { date: true, duration: true },
+    });
 
     const availableDates = [];
 
@@ -685,17 +758,7 @@ const getAvailableDates = async (req, res) => {
       if (dateObj > maxBookingDate) continue;
 
       // Determine working hours
-      let startHour, endHour;
-      const vetSlot = (vet.availability || []).find(
-        (s) => s.dayOfWeek === dayOfWeek
-      );
-      if (vetSlot) {
-        startHour = vetSlot.start;
-        endHour = vetSlot.end;
-      } else {
-        startHour = config.workingHours.start;
-        endHour = config.workingHours.end;
-      }
+      const { start: startHour, end: endHour } = workingHoursFor(vet, dayOfWeek, config);
 
       const [startH, startM] = startHour.split(":").map(Number);
       const [endH, endM] = endHour.split(":").map(Number);
@@ -746,7 +809,7 @@ const getAvailableDates = async (req, res) => {
 
     res.status(200).send({ enabled: true, dates: availableDates });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -758,8 +821,10 @@ const getMyPriceInfo = async (req, res) => {
       return res.status(200).send({ enabled: false });
     }
 
-    const customer = await Customer.findById(req.user._id);
-    const totalSpent = customer?.loyalty?.totalSpent || 0;
+    const customer = isUuid(req.user._id)
+      ? await getPrisma().customer.findUnique({ where: { id: req.user._id } })
+      : null;
+    const totalSpent = num(customer?.loyaltyTotalSpent);
     const discountPercent = calculateDiscount(
       totalSpent,
       config.discountTiers,
@@ -784,7 +849,7 @@ const getMyPriceInfo = async (req, res) => {
       freeThreshold: config.freeThreshold,
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -792,49 +857,90 @@ const getMyPriceInfo = async (req, res) => {
 // ADMIN APPOINTMENT ENDPOINTS
 // ==========================================
 
+/** Columnas por las que el panel puede ordenar la agenda. */
+const SORTABLE = ["date", "createdAt", "updatedAt", "status", "finalPrice"];
+
 // GET /vet/admin/appointments
 const getAllAppointments = async (req, res) => {
   try {
     const { status, veterinarianId, page = 1, limit = 20, sortBy = "date" } = req.query;
-    const pages = Number(page);
-    const limits = Number(limit);
+    const pages = Number(page) || 1;
+    const limits = Number(limit) || 20;
 
-    const filter = {};
-    if (status) filter.status = status;
-    if (veterinarianId) filter.veterinarian = veterinarianId;
+    const where = {};
+    if (status) where.status = status;
+    if (veterinarianId && isUuid(veterinarianId)) where.veterinarianId = veterinarianId;
 
-    const appointments = await VetAppointment.find(filter)
-      .populate("customer", "name email phone loyalty")
-      .populate("veterinarian", "name email specialties")
-      .populate("customerPet", "name species breed")
-      .sort({ [sortBy]: -1 })
-      .skip((pages - 1) * limits)
-      .limit(limits);
+    const orderBy = { [SORTABLE.includes(sortBy) ? sortBy : "date"]: "desc" };
 
-    const totalDoc = await VetAppointment.countDocuments(filter);
+    const [rows, totalDoc] = await Promise.all([
+      appointments().findMany({
+        where,
+        include: {
+          customer: {
+            select: {
+              id: true, name: true, email: true, phone: true,
+              loyaltyPoints: true, loyaltyTotalPoints: true, loyaltyTotalSpent: true,
+              loyaltyOrderCount: true, loyaltyTier: true, loyaltyJoinedAt: true,
+            },
+          },
+          veterinarian: { select: { id: true, name: true, email: true, specialties: true } },
+          customerPet: { select: { id: true, name: true, species: true, breed: true } },
+        },
+        orderBy,
+        skip: (pages - 1) * limits,
+        take: limits,
+      }),
+      appointments().count({ where }),
+    ]);
 
-    res.status(200).send({ appointments, totalDoc, limits, pages });
+    res.status(200).send({
+      appointments: rows.map(vetAppointmentToApi),
+      totalDoc,
+      limits,
+      pages,
+    });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 // GET /vet/admin/appointments/:id
 const getAppointmentAdmin = async (req, res) => {
   try {
-    const appointment = await VetAppointment.findById(req.params.id)
-      .populate("customer", "name email phone loyalty")
-      .populate("veterinarian", "name email specialties phone")
-      .populate("customerPet", "name species breed age weight gender image notes");
+    if (!isUuid(req.params.id)) return notFound(res, "Cita no encontrada");
 
-    if (!appointment) {
-      return res.status(404).send({ message: "Cita no encontrada" });
-    }
+    const appointment = await appointments().findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: {
+          select: {
+            id: true, name: true, email: true, phone: true,
+            loyaltyPoints: true, loyaltyTotalPoints: true, loyaltyTotalSpent: true,
+            loyaltyOrderCount: true, loyaltyTier: true, loyaltyJoinedAt: true,
+          },
+        },
+        veterinarian: {
+          select: { id: true, name: true, email: true, specialties: true, phone: true },
+        },
+        customerPet: { select: PET_FULL },
+      },
+    });
 
-    res.status(200).send(appointment);
+    if (!appointment) return notFound(res, "Cita no encontrada");
+
+    res.status(200).send(vetAppointmentToApi(appointment));
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
+};
+
+/** Transiciones de estado permitidas desde el panel. */
+const VALID_TRANSITIONS = {
+  requested: ["approved", "rejected"],
+  approved: ["confirmed", "cancelled"],
+  confirmed: ["in_progress", "cancelled", "no_show"],
+  in_progress: ["completed"],
 };
 
 // PATCH /vet/admin/appointments/:id/status
@@ -843,22 +949,14 @@ const updateAppointmentStatus = async (req, res) => {
     const { status, note, rejectionReason } = req.body;
     const config = await getOrCreateConfig();
 
-    const appointment = await VetAppointment.findById(req.params.id);
-    if (!appointment) {
-      return res.status(404).send({ message: "Cita no encontrada" });
-    }
+    if (!isUuid(req.params.id)) return notFound(res, "Cita no encontrada");
+    const current = await appointments().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "Cita no encontrada");
 
-    const validTransitions = {
-      requested: ["approved", "rejected"],
-      approved: ["confirmed", "cancelled"],
-      confirmed: ["in_progress", "cancelled", "no_show"],
-      in_progress: ["completed"],
-    };
-
-    const allowed = validTransitions[appointment.status] || [];
+    const allowed = VALID_TRANSITIONS[current.status] || [];
     if (!allowed.includes(status)) {
       return res.status(400).send({
-        message: `No se puede cambiar de '${appointment.status}' a '${status}'`,
+        message: `No se puede cambiar de '${current.status}' a '${status}'`,
       });
     }
 
@@ -872,40 +970,47 @@ const updateAppointmentStatus = async (req, res) => {
       }
     }
 
-    appointment.status = status;
-    appointment.statusHistory.push({
+    const data = {
       status,
-      changedAt: new Date(),
-      changedBy: "admin",
-      note: (status === "rejected" ? (req.body.rejectionReason || note) : note) || "",
-    });
+      statusHistory: appendHistory(current, {
+        status,
+        changedAt: new Date().toISOString(),
+        changedBy: "admin",
+        note: (status === "rejected" ? (rejectionReason || note) : note) || "",
+      }),
+    };
 
     // Generate meeting URL when approving
-    if (status === "approved" && !appointment.meetingUrl) {
+    if (status === "approved" && !current.meetingUrl) {
       if (config.videoPlatform === "jitsi") {
-        appointment.meetingUrl = generateJitsiUrl(appointment._id);
+        data.meetingUrl = generateJitsiUrl(current.id);
       }
       // Google Meet integration would go here
     }
 
     if (status === "cancelled") {
-      appointment.cancelledBy = "admin";
-      appointment.cancellationReason = note || "Cancelada por administración";
+      data.cancelledBy = "admin";
+      data.cancellationReason = note || "Cancelada por administración";
     }
 
     if (status === "rejected") {
-      appointment.cancellationReason = req.body.rejectionReason || note || "";
+      data.cancellationReason = rejectionReason || note || "";
     }
 
     if (req.body.adminNotes !== undefined) {
-      appointment.adminNotes = req.body.adminNotes;
+      data.adminNotes = req.body.adminNotes;
     }
 
-    await appointment.save();
-
-    await appointment.populate("customer", "name email");
-    await appointment.populate("veterinarian", "name");
-    await appointment.populate("customerPet", "name species");
+    const updated = await appointments().update({
+      where: { id: current.id },
+      data,
+      include: {
+        customer: { select: { id: true, name: true, email: true } },
+        veterinarian: { select: { id: true, name: true } },
+        customerPet: { select: { id: true, name: true, species: true } },
+      },
+    });
+    const appointment = vetAppointmentToApi(updated);
 
     // Send email notification (fire-and-forget)
     if (appointment.customer?.email) {
@@ -926,17 +1031,16 @@ const updateAppointmentStatus = async (req, res) => {
 
     res.status(200).send({ message: "Estado actualizado", appointment });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 // PUT /vet/admin/appointments/:id/notes
 const updateAppointmentNotes = async (req, res) => {
   try {
-    const appointment = await VetAppointment.findById(req.params.id);
-    if (!appointment) {
-      return res.status(404).send({ message: "Cita no encontrada" });
-    }
+    if (!isUuid(req.params.id)) return notFound(res, "Cita no encontrada");
+    const current = await appointments().findUnique({ where: { id: req.params.id } });
+    if (!current) return notFound(res, "Cita no encontrada");
 
     const { clinicalNotes, diagnosis, recommendations, adminNotes } = req.body;
 
@@ -952,16 +1056,21 @@ const updateAppointmentNotes = async (req, res) => {
       });
     }
 
-    if (clinicalNotes !== undefined) appointment.clinicalNotes = clinicalNotes;
-    if (diagnosis !== undefined) appointment.diagnosis = diagnosis;
-    if (recommendations !== undefined)
-      appointment.recommendations = recommendations;
-    if (adminNotes !== undefined) appointment.adminNotes = adminNotes;
+    const data = {};
+    if (clinicalNotes !== undefined) data.clinicalNotes = clinicalNotes;
+    if (diagnosis !== undefined) data.diagnosis = diagnosis;
+    if (recommendations !== undefined) data.recommendations = recommendations;
+    if (adminNotes !== undefined) data.adminNotes = adminNotes;
 
-    await appointment.save();
-    res.status(200).send({ message: "Notas actualizadas", appointment });
+    const appointment = await appointments().update({
+      where: { id: current.id },
+      data,
+    });
+    res
+      .status(200)
+      .send({ message: "Notas actualizadas", appointment: vetAppointmentToApi(appointment) });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
@@ -975,20 +1084,20 @@ const getVetStats = async (req, res) => {
 
     const [totalAppointments, todayAppointments, pendingRequests, statusCounts] =
       await Promise.all([
-        VetAppointment.countDocuments(),
-        VetAppointment.countDocuments({
-          date: { $gte: today, $lt: tomorrow },
-          status: { $nin: ["cancelled", "rejected"] },
+        appointments().count(),
+        appointments().count({
+          where: {
+            date: { gte: today, lt: tomorrow },
+            status: { notIn: ["cancelled", "rejected"] },
+          },
         }),
-        VetAppointment.countDocuments({ status: "requested" }),
-        VetAppointment.aggregate([
-          { $group: { _id: "$status", count: { $sum: 1 } } },
-        ]),
+        appointments().count({ where: { status: "requested" } }),
+        appointments().groupBy({ by: ["status"], _count: { _all: true } }),
       ]);
 
     const statusMap = {};
     statusCounts.forEach((s) => {
-      statusMap[s._id] = s.count;
+      statusMap[s.status] = s._count._all;
     });
 
     res.status(200).send({
@@ -998,20 +1107,23 @@ const getVetStats = async (req, res) => {
       statusBreakdown: statusMap,
     });
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 
 // GET /vet/admin/pets/:customerId — Get customer's pets (admin view)
 const getCustomerPetsAdmin = async (req, res) => {
   try {
-    const pets = await CustomerPet.find({
-      customer: req.params.customerId,
-    }).sort({ createdAt: -1 });
+    if (!isUuid(req.params.customerId)) return res.status(200).send([]);
 
-    res.status(200).send(pets);
+    const rows = await pets().findMany({
+      where: { customerId: req.params.customerId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.status(200).send(rows.map(toApi));
   } catch (err) {
-    res.status(500).send({ message: err.message });
+    fail(res, err);
   }
 };
 

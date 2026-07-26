@@ -75,8 +75,8 @@
         "properties": {
           "_id": {
             "type": "string",
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "productId": {
             "type": "string"
@@ -100,26 +100,26 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[a-f\\d]{24}$",
-              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
             }
           },
           "category": {
             "type": "string",
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "pet": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "brand": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "image": {
             "type": "array",
@@ -219,26 +219,26 @@
             "nullable": true,
             "items": {
               "type": "string",
-              "pattern": "^[a-f\\d]{24}$",
-              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
             }
           },
           "category": {
             "type": "string",
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "pet": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "brand": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "image": {
             "type": "array",
@@ -311,26 +311,26 @@
             "nullable": true,
             "items": {
               "type": "string",
-              "pattern": "^[a-f\\d]{24}$",
-              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
             }
           },
           "category": {
             "type": "string",
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "pet": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "brand": {
             "type": "string",
             "nullable": true,
-            "pattern": "^[a-f\\d]{24}$",
-            "example": "665f1b2c3d4e5f6a7b8c9d0e"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
           },
           "image": {
             "type": "array",
@@ -551,8 +551,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^[a-f\\d]{24}$",
-              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
             },
             "required": true,
             "name": "id",
@@ -612,8 +612,8 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^[a-f\\d]{24}$",
-              "example": "665f1b2c3d4e5f6a7b8c9d0e"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "example": "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10"
             },
             "required": true,
             "name": "id",

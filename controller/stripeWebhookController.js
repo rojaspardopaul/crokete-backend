@@ -1,6 +1,5 @@
 require("dotenv").config();
 const stripe = require("stripe");
-const Order = require("../models/Order");
 const { logPaymentEvent } = require("../utils/paymentLogger");
 const { getStripeConfig } = require("../utils/getConfig");
 

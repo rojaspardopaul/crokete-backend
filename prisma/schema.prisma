@@ -233,6 +233,10 @@ enum AuditStatus {
   failure
 }
 
+/// Los cuatro últimos valores los emiten los controladores de pago desde
+/// siempre, pero faltaban en el enum de Mongoose: la validación fallaba y el
+/// `.catch()` de logPaymentEvent se tragaba el error, así que justo los eventos
+/// de fraude y de pago inválido eran los únicos que nunca quedaban registrados.
 enum PaymentEvent {
   PAYMENT_INTENT_CREATED
   PAYMENT_INTENT_UPDATED
@@ -242,6 +246,10 @@ enum PaymentEvent {
   ORDER_CREATION_FAILED
   WEBHOOK_RECEIVED
   REFUND_INITIATED
+  ORDER_AMOUNT_MISMATCH
+  RAZORPAY_SIGNATURE_INVALID
+  RAZORPAY_PAYMENT_INVALID
+  RAZORPAY_VERIFY_ERROR
 }
 
 enum PaymentLogStatus {
@@ -604,6 +612,10 @@ model Order {
   cardInfo              Json?
 
   status OrderStatus @default(pedido)
+  /// Confirmación de la pasarela. El módulo DDD la usa como guarda de
+  /// idempotencia: un webhook repetido no vuelve a descontar stock ni a dar
+  /// puntos. Vivía sólo en memoria del agregado, sin columna donde persistirla.
+  paid   Boolean     @default(false)
 
   notifications     Notification[]
   paymentLogs       PaymentLog[]

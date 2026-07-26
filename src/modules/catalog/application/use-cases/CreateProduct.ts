@@ -24,7 +24,8 @@ export class CreateProduct {
   ): Promise<Result<Record<string, unknown>, ValidationError>> {
     const input = toProductCreateInput(dto);
 
-    // Parity with legacy: productId defaults to a fresh ObjectId when absent.
+    // Parity with legacy: productId (el código interno editable) toma el mismo
+    // identificador recién generado cuando el alta no trae uno.
     const id = this.products.nextIdentity();
     if (!input.productId) input.productId = id;
 

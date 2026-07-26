@@ -5,30 +5,11 @@ const { getConfigStatus, invalidateConfigCache } = require("../utils/getConfig")
 
 const settings = () => getPrisma().setting;
 
-/** Devuelve el objeto `setting` de una configuración con nombre dado. */
-async function readSetting(name) {
-  const row = await settings().findUnique({ where: { name } });
-  return row ? row.setting : null;
-}
+/** Lectura y merge atómico viven en lib/prisma/settings (uso compartido). */
+const { readSetting, mergeSetting } = require("../lib/prisma/settings");
 
-/**
- * Fusiona claves de primer nivel dentro del jsonb, creando la fila si no
- * existe. El operador `||` de jsonb hace exactamente el mismo merge superficial
- * que `$set: { "setting.<clave>": valor }` en Mongo, pero en una sola sentencia
- * atómica: no hay lectura-modificación-escritura que se pueda perder si dos
- * pestañas del panel guardan a la vez.
- */
-async function mergeSetting(name, patch) {
-  const prisma = getPrisma();
-  const rows = await prisma.$queryRaw`
-    INSERT INTO settings (id, name, setting, "createdAt", "updatedAt")
-    VALUES (gen_random_uuid(), ${name}, ${JSON.stringify(patch || {})}::jsonb, now(), now())
-    ON CONFLICT (name) DO UPDATE
-      SET setting = settings.setting || EXCLUDED.setting,
-          "updatedAt" = now()
-    RETURNING *`;
-  return toApi(rows[0]);
-}
+/** El panel espera la fila ya traducida a la forma de la API. */
+const saveSetting = async (name, patch) => toApi(await mergeSetting(name, patch));
 
 // ─── Configuración global ────────────────────────────────────────────────────
 
@@ -55,7 +36,7 @@ const getGlobalSetting = async (req, res) => {
 
 const updateGlobalSetting = async (req, res) => {
   try {
-    const data = await mergeSetting("globalSetting", req.body.setting);
+    const data = await saveSetting("globalSetting", req.body.setting);
     res.send({ data, message: "¡Configuración global actualizada correctamente!" });
   } catch (err) {
     fail(res, err);
@@ -87,7 +68,7 @@ const getStoreSetting = async (req, res) => {
       google_login_status, google_id,
       facebook_login_status, facebook_id,
       github_login_status, github_id,
-      meta_url, razorpay_id, razorpay_status,
+      meta_url,
       stripe_key, stripe_status,
       tawk_chat_property_id, tawk_chat_status, tawk_chat_widget_id,
     } = setting;
@@ -103,8 +84,6 @@ const getStoreSetting = async (req, res) => {
       google_login_status,
       google_oauth_ready: !!(google_login_status && google_id),
       meta_url,
-      razorpay_id,
-      razorpay_status,
       stripe_key,
       stripe_status,
       tawk_chat_property_id,
@@ -129,14 +108,14 @@ const getStoreSecretKeys = async (req, res) => {
       google_id, google_secret, google_login_status,
       facebook_id, facebook_secret, facebook_login_status,
       github_id, github_secret, github_login_status,
-      razorpay_id, razorpay_secret, stripe_secret, nextauth_secret,
+      stripe_secret, nextauth_secret,
     } = setting;
 
     res.send({
       google_id, google_secret, google_login_status,
       facebook_id, facebook_secret, facebook_login_status,
       github_id, github_secret, github_login_status,
-      razorpay_id, razorpay_secret, stripe_secret, nextauth_secret,
+      stripe_secret, nextauth_secret,
     });
   } catch (err) {
     fail(res, err);
@@ -145,7 +124,7 @@ const getStoreSecretKeys = async (req, res) => {
 
 const updateStoreSetting = async (req, res) => {
   try {
-    const data = await mergeSetting("storeSetting", req.body.setting);
+    const data = await saveSetting("storeSetting", req.body.setting);
     invalidateConfigCache();
     res.send({ data, message: "¡Configuración de la tienda actualizada correctamente!" });
   } catch (err) {
@@ -192,7 +171,7 @@ const getStoreSeoSetting = async (req, res) => {
 
 const updateStoreCustomizationSetting = async (req, res) => {
   try {
-    const data = await mergeSetting("storeCustomizationSetting", req.body.setting);
+    const data = await saveSetting("storeCustomizationSetting", req.body.setting);
     res.send({ data, message: "¡Personalización de la tienda actualizada correctamente!" });
   } catch (err) {
     fail(res, err);

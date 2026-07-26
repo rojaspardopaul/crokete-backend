@@ -1,179 +1,184 @@
-const Order = require("../models/Order");
-const escapeRegex = require("../utils/escapeRegex");
+const { getPrisma } = require("../lib/prisma");
+const { orderToApi, toApi, num } = require("../lib/prisma/presenters");
+const { isUuid, fail, notFound } = require("../lib/prisma/helpers");
 const { applyStatusChangeEffects } = require("../lib/orders/statusChangeEffects");
 
+const orders = () => getPrisma().order;
+
+/** Estados válidos del pedido (el enum de Postgres los rechaza si no coinciden). */
+const STATUSES = ["pedido", "empaquetado", "en_reparto", "entregado", "cancelado"];
+
+/**
+ * Columnas del listado del panel. `items` no se incluye: la tabla de pedidos
+ * sólo muestra folio, cliente e importes, y traer el carrito completo de cada
+ * fila multiplicaría el peso de la respuesta.
+ */
+const LIST_SELECT = {
+  id: true,
+  invoice: true,
+  paymentMethod: true,
+  subTotal: true,
+  total: true,
+  userInfo: true,
+  discount: true,
+  shippingCost: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+/** El listado devuelve `user_info`, no `userInfo`. */
+const listRowToApi = (row) => {
+  const { userInfo, ...rest } = row;
+  return { ...toApi(rest), user_info: userInfo };
+};
+
+/** `take` sólo se aplica con un límite numérico positivo, como hacía Mongoose. */
+const paginate = (page, limit, fallbackLimit) => {
+  const pages = Number(page) || 1;
+  const limits = Number(limit) || fallbackLimit;
+  const take = Number.isFinite(limits) && limits > 0 ? limits : undefined;
+  const skip = take ? (pages - 1) * take : 0;
+  return { pages, limits, take, skip };
+};
+
 const getAllOrders = async (req, res) => {
-  const {
-    day,
-    status,
-    page,
-    limit,
-    method,
-    endDate,
-    // download,
-    // sellFrom,
-    startDate,
-    customerName,
-  } = req.query;
+  const { day, status, page, limit, method, endDate, startDate, customerName } =
+    req.query;
 
-  // console.log("called");
+  const where = {};
 
-  //  day count
-  let date = new Date();
-  const today = date.toString();
-  date.setDate(date.getDate() - Number(day));
-  const dateTime = date.toString();
-
-  const beforeToday = new Date();
-  beforeToday.setDate(beforeToday.getDate() - 1);
-  // const before_today = beforeToday.toString();
-
-  const startDateData = new Date(startDate);
-  startDateData.setDate(startDateData.getDate());
-  const start_date = startDateData.toString();
-
-  // console.log(" start_date", start_date, endDate);
-
-  const queryObject = {};
-
-  if (!status) {
-    queryObject.$or = [
-      { status: { $regex: `pedido`, $options: "i" } },
-      { status: { $regex: `empaquetado`, $options: "i" } },
-      { status: { $regex: `en_reparto`, $options: "i" } },
-      { status: { $regex: `entregado`, $options: "i" } },
-      { status: { $regex: `cancelado`, $options: "i" } },
-    ];
+  if (status) {
+    // Mongo aceptaba cualquier texto como expresión regular; el enum de
+    // Postgres no, así que un estado desconocido simplemente no filtra nada.
+    const normalized = String(status).trim().toLowerCase();
+    if (STATUSES.includes(normalized)) where.status = normalized;
   }
 
   if (customerName) {
-    queryObject.$or = [
-      { "user_info.name": { $regex: escapeRegex(customerName), $options: "i" } },
-      { invoice: { $regex: escapeRegex(customerName), $options: "i" } },
+    const term = String(customerName).trim();
+    const asInvoice = Number(term);
+    where.OR = [
+      // `user_info` es jsonb: se busca dentro de la clave `name`.
+      { userInfo: { path: ["name"], string_contains: term, mode: "insensitive" } },
+      // El folio es numérico. En Mongo se comparaba con una expresión regular
+      // contra un campo Number, que nunca casaba: buscar por folio no funcionaba.
+      ...(Number.isInteger(asInvoice) ? [{ invoice: asInvoice }] : []),
     ];
   }
 
   if (day) {
-    queryObject.createdAt = { $gte: dateTime, $lte: today };
-  }
-
-  if (status) {
-    queryObject.status = { $regex: escapeRegex(status), $options: "i" };
+    const from = new Date();
+    from.setDate(from.getDate() - Number(day));
+    where.createdAt = { gte: from, lte: new Date() };
   }
 
   if (startDate && endDate) {
-    queryObject.updatedAt = {
-      $gt: start_date,
-      $lt: endDate,
-    };
-  }
-  if (method) {
-    queryObject.paymentMethod = { $regex: escapeRegex(method), $options: "i" };
+    where.updatedAt = { gt: new Date(startDate), lt: new Date(endDate) };
   }
 
-  const pages = Number(page) || 1;
-  const limits = Number(limit);
-  const skip = (pages - 1) * limits;
+  if (method) {
+    where.paymentMethod = { contains: String(method), mode: "insensitive" };
+  }
+
+  const { pages, limits, take, skip } = paginate(page, limit);
 
   try {
-    // total orders count
-    const totalDoc = await Order.countDocuments(queryObject);
-    const orders = await Order.find(queryObject)
-      .select(
-        "_id invoice paymentMethod subTotal total user_info discount shippingCost status createdAt updatedAt"
-      )
-      .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(limits);
+    const [totalDoc, rows] = await Promise.all([
+      orders().count({ where }),
+      orders().findMany({
+        where,
+        select: LIST_SELECT,
+        orderBy: { updatedAt: "desc" },
+        skip,
+        take,
+      }),
+    ]);
 
     let methodTotals = [];
     if (startDate && endDate) {
-      // console.log("filter method total");
-      const filteredOrders = await Order.find(queryObject, {
-        _id: 1,
-        // subTotal: 1,
-        total: 1,
-
-        paymentMethod: 1,
-        // createdAt: 1,
-        updatedAt: 1,
-      }).sort({ updatedAt: -1 });
-      for (const order of filteredOrders) {
-        const { paymentMethod, total } = order;
-        const existPayment = methodTotals.find(
-          (item) => item.method === paymentMethod
-        );
-
-        if (existPayment) {
-          existPayment.total += total;
-        } else {
-          methodTotals.push({
-            method: paymentMethod,
-            total: total,
-          });
-        }
-      }
+      // El total por método de pago lo agrupa la base; antes se recorría en
+      // memoria todo el rango de fechas.
+      const grouped = await orders().groupBy({
+        by: ["paymentMethod"],
+        where,
+        _sum: { total: true },
+      });
+      methodTotals = grouped.map((g) => ({
+        method: g.paymentMethod,
+        total: num(g._sum.total),
+      }));
     }
 
     res.send({
-      orders,
+      orders: rows.map(listRowToApi),
       limits,
       pages,
       totalDoc,
       methodTotals,
-      // orderOverview,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getOrderCustomer = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.params.id }).sort({ _id: -1 });
-    res.send(orders);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return res.send([]);
+    const rows = await orders().findMany({
+      where: { customerId: req.params.id },
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
     });
+    res.send(rows.map(orderToApi));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const getOrderById = async (req, res) => {
   try {
-    // console.log("getOrderById");
-
-    const order = await Order.findById(req.params.id);
-    res.send(order);
-  } catch (err) {
-    res.status(500).send({
-      message: err.message,
+    if (!isUuid(req.params.id)) return notFound(res, "Pedido no encontrado");
+    const order = await orders().findUnique({
+      where: { id: req.params.id },
+      include: { items: true },
     });
+    if (!order) return notFound(res, "Pedido no encontrado");
+    res.send(orderToApi(order));
+  } catch (err) {
+    fail(res, err);
   }
 };
 
 const updateOrder = async (req, res) => {
   try {
     const newStatus = req.body.status;
+    if (!STATUSES.includes(newStatus)) {
+      return res.status(400).send({ message: "Estado de pedido no válido" });
+    }
+    if (!isUuid(req.params.id)) {
+      return notFound(res, "Pedido no encontrado");
+    }
 
     // Get the current order to know previous status
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return res.status(404).send({ message: "Pedido no encontrado" });
+    const current = await orders().findUnique({
+      where: { id: req.params.id },
+      include: { items: true },
+    });
+    if (!current) {
+      return notFound(res, "Pedido no encontrado");
     }
-    const previousStatus = order.status;
+    const previousStatus = current.status;
 
-    await Order.updateOne(
-      { _id: req.params.id },
-      { $set: { status: newStatus } }
-    );
+    await orders().update({
+      where: { id: req.params.id },
+      data: { status: newStatus },
+    });
 
     // Side effects (loyalty coupon restore + points + status email). Extracted
     // to lib/orders/statusChangeEffects so the new TS orders module reuses the
     // exact same logic.
-    await applyStatusChangeEffects(order, newStatus, previousStatus);
+    await applyStatusChangeEffects(orderToApi(current), newStatus, previousStatus);
 
     res.status(200).send({
       message: "¡Pedido actualizado correctamente!",
@@ -187,7 +192,15 @@ const updateOrder = async (req, res) => {
 
 const deleteOrder = async (req, res) => {
   try {
-    await Order.deleteOne({ _id: req.params.id });
+    if (!isUuid(req.params.id)) {
+      return notFound(res, "Pedido no encontrado");
+    }
+    // Las líneas del pedido caen en cascada; los registros de pago y los
+    // movimientos de puntos conservan su historia con la referencia en NULL.
+    const deleted = await orders().deleteMany({ where: { id: req.params.id } });
+    if (deleted.count === 0) {
+      return notFound(res, "Pedido no encontrado");
+    }
 
     res.status(200).send({
       message: "¡Pedido eliminado correctamente!",
@@ -202,474 +215,214 @@ const deleteOrder = async (req, res) => {
 // get dashboard recent order
 const getDashboardRecentOrder = async (req, res) => {
   try {
-    // console.log("getDashboardRecentOrder");
-
     const { page, limit } = req.query;
+    const { take, skip } = paginate(page, limit, 8);
 
-    const pages = Number(page) || 1;
-    const limits = Number(limit) || 8;
-    const skip = (pages - 1) * limits;
-
-    const queryObject = {};
-
-    queryObject.$or = [
-      { status: { $regex: `pedido`, $options: "i" } },
-      { status: { $regex: `empaquetado`, $options: "i" } },
-      { status: { $regex: `en_reparto`, $options: "i" } },
-      { status: { $regex: `entregado`, $options: "i" } },
-      { status: { $regex: `cancelado`, $options: "i" } },
-    ];
-
-    const totalDoc = await Order.countDocuments(queryObject);
-
-    // query for orders
-    const orders = await Order.find(queryObject)
-      .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(limits);
-
-    // console.log('order------------<', orders);
+    const [totalDoc, rows] = await Promise.all([
+      orders().count(),
+      orders().findMany({
+        include: { items: true },
+        orderBy: { updatedAt: "desc" },
+        skip,
+        take,
+      }),
+    ]);
 
     res.send({
-      orders: orders,
+      orders: rows.map(orderToApi),
       page: page,
       limit: limit,
       totalOrder: totalDoc,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
+
+/**
+ * Suma e importe por estado. Mongo devolvía `[{ _id: null, total, count }]` y el
+ * panel lee `.count` / `.total`, así que se conserva esa forma exacta.
+ */
+async function statusTotals(status) {
+  const result = await orders().aggregate({
+    where: { status },
+    _sum: { total: true },
+    _count: { _all: true },
+  });
+  const count = result._count._all;
+  if (count === 0) return null;
+  return { _id: null, total: num(result._sum.total), count };
+}
 
 // get dashboard count
 const getDashboardCount = async (req, res) => {
   try {
-    // console.log("getDashboardCount");
-
-    const totalDoc = await Order.countDocuments();
-
-    // total pedido order count
-    const totalPendingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "pedido",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    // total empaquetado order count
-    const totalProcessingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "empaquetado",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    // total entregado order count
-    const totalDeliveredOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "entregado",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          count: {
-            $sum: 1,
-          },
-        },
-      },
+    const [totalDoc, pending, processing, delivered] = await Promise.all([
+      orders().count(),
+      statusTotals("pedido"),
+      statusTotals("empaquetado"),
+      statusTotals("entregado"),
     ]);
 
     res.send({
       totalOrder: totalDoc,
-      totalPendingOrder: totalPendingOrder[0] || 0,
-      totalProcessingOrder: totalProcessingOrder[0]?.count || 0,
-      totalDeliveredOrder: totalDeliveredOrder[0]?.count || 0,
+      totalPendingOrder: pending || 0,
+      totalProcessingOrder: processing?.count || 0,
+      totalDeliveredOrder: delivered?.count || 0,
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
+/** Suma de `total` de los pedidos entregados dentro de un rango de fechas. */
+async function deliveredTotalBetween(gte, lt) {
+  const result = await orders().aggregate({
+    where: { status: "entregado", updatedAt: { gte, lt } },
+    _sum: { total: true },
+    _count: { _all: true },
+  });
+  return result._count._all === 0 ? undefined : num(result._sum.total);
+}
+
 const getDashboardAmount = async (req, res) => {
-  // console.log('total')
   let week = new Date();
   week.setDate(week.getDate() - 10);
 
-  // console.log('getDashboardAmount');
-
-  const currentDate = new Date();
-  currentDate.setDate(1); // Set the date to the first day of the current month
-  currentDate.setHours(0, 0, 0, 0); // Set the time to midnight
-
-  const lastMonthStartDate = new Date(currentDate); // Copy the current date
-  lastMonthStartDate.setMonth(currentDate.getMonth() - 1); // Subtract one month
-
-  let lastMonthEndDate = new Date(currentDate); // Copy the current date
-  lastMonthEndDate.setDate(0); // Set the date to the last day of the previous month
-  lastMonthEndDate.setHours(23, 59, 59, 999); // Set the time to the end of the day
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
   try {
-    // total order amount
-    const totalAmount = await Order.aggregate([
-      {
-        $group: {
-          _id: null,
-          tAmount: {
-            $sum: "$total",
-          },
+    const [totalAgg, thisMonth, lastMonth, ordersData] = await Promise.all([
+      orders().aggregate({ _sum: { total: true }, _count: { _all: true } }),
+      deliveredTotalBetween(thisMonthStart, nextMonthStart),
+      deliveredTotalBetween(lastMonthStart, thisMonthStart),
+      // order list last 10 days
+      orders().findMany({
+        where: { status: "entregado", updatedAt: { gte: week } },
+        select: {
+          id: true,
+          paymentMethod: true,
+          total: true,
+          createdAt: true,
+          updatedAt: true,
         },
-      },
+      }),
     ]);
-    // console.log('totalAmount',totalAmount)
-    const thisMonthOrderAmount = await Order.aggregate([
-      {
-        $project: {
-          year: { $year: "$updatedAt" },
-          month: { $month: "$updatedAt" },
-          total: 1,
-          subTotal: 1,
-          discount: 1,
-          updatedAt: 1,
-          createdAt: 1,
-          status: 1,
-        },
-      },
-      {
-        $match: {
-          status: { $regex: "entregado", $options: "i" },
-          year: { $eq: new Date().getFullYear() },
-          month: { $eq: new Date().getMonth() + 1 },
-          // $expr: {
-          //   $eq: [{ $month: "$updatedAt" }, { $month: new Date() }],
-          // },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            month: {
-              $month: "$updatedAt",
-            },
-          },
-          total: {
-            $sum: "$total",
-          },
-          subTotal: {
-            $sum: "$subTotal",
-          },
-
-          discount: {
-            $sum: "$discount",
-          },
-        },
-      },
-      {
-        $sort: { _id: -1 },
-      },
-      {
-        $limit: 1,
-      },
-    ]);
-
-    const lastMonthOrderAmount = await Order.aggregate([
-      {
-        $project: {
-          year: { $year: "$updatedAt" },
-          month: { $month: "$updatedAt" },
-          total: 1,
-          subTotal: 1,
-          discount: 1,
-          updatedAt: 1,
-          createdAt: 1,
-          status: 1,
-        },
-      },
-      {
-        $match: {
-          status: { $regex: "entregado", $options: "i" },
-
-          updatedAt: { $gt: lastMonthStartDate, $lt: lastMonthEndDate },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            month: {
-              $month: "$updatedAt",
-            },
-          },
-          total: {
-            $sum: "$total",
-          },
-          subTotal: {
-            $sum: "$subTotal",
-          },
-
-          discount: {
-            $sum: "$discount",
-          },
-        },
-      },
-      {
-        $sort: { _id: -1 },
-      },
-      {
-        $limit: 1,
-      },
-    ]);
-
-    // console.log("thisMonthlyOrderAmount ===>", thisMonthlyOrderAmount);
-
-    // order list last 10 days
-    const orderFilteringData = await Order.find(
-      {
-        status: { $regex: `entregado`, $options: "i" },
-        updatedAt: {
-          $gte: week,
-        },
-      },
-
-      {
-        paymentMethod: 1,
-        paymentDetails: 1,
-        total: 1,
-        createdAt: 1,
-        updatedAt: 1,
-      }
-    );
 
     res.send({
       totalAmount:
-        totalAmount.length === 0
+        totalAgg._count._all === 0
           ? 0
-          : parseFloat(totalAmount[0].tAmount).toFixed(2),
-      thisMonthlyOrderAmount: thisMonthOrderAmount[0]?.total,
-      lastMonthOrderAmount: lastMonthOrderAmount[0]?.total,
-      ordersData: orderFilteringData,
+          : num(totalAgg._sum.total).toFixed(2),
+      thisMonthlyOrderAmount: thisMonth,
+      lastMonthOrderAmount: lastMonth,
+      ordersData: ordersData.map(toApi),
     });
   } catch (err) {
-    // console.log('err',err)
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getBestSellerProductChart = async (req, res) => {
   try {
-    // console.log("getBestSellerProductChart");
-
-    const totalDoc = await Order.countDocuments({});
-    const bestSellingProduct = await Order.aggregate([
-      {
-        $unwind: "$cart",
-      },
-      {
-        $group: {
-          _id: "$cart.title",
-
-          count: {
-            $sum: "$cart.quantity",
-          },
-        },
-      },
-      {
-        $sort: {
-          count: -1,
-        },
-      },
-      {
-        $limit: 4,
-      },
+    const [totalDoc, grouped] = await Promise.all([
+      orders().count(),
+      // Equivale al $unwind + $group sobre `cart`: ahora cada línea es una fila.
+      getPrisma().orderItem.groupBy({
+        by: ["title"],
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: "desc" } },
+        take: 4,
+      }),
     ]);
 
     res.send({
       totalDoc,
-      bestSellingProduct,
+      bestSellingProduct: grouped.map((g) => ({
+        _id: g.title,
+        count: g._sum.quantity || 0,
+      })),
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 
 const getDashboardOrders = async (req, res) => {
   const { page, limit } = req.query;
-
-  const pages = Number(page) || 1;
-  const limits = Number(limit) || 8;
-  const skip = (pages - 1) * limits;
+  const { take, skip } = paginate(page, limit, 8);
 
   let week = new Date();
   week.setDate(week.getDate() - 10);
 
-  const start = new Date().toDateString();
-
-  // (startDate = '12:00'),
-  //   (endDate = '23:59'),
-  // console.log("page, limit", page, limit);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
 
   try {
-    const totalDoc = await Order.countDocuments({});
-
-    // query for orders
-    const orders = await Order.find({})
-      .sort({ _id: -1 })
-      .skip(skip)
-      .limit(limits);
-
-    const totalAmount = await Order.aggregate([
-      {
-        $group: {
-          _id: null,
-          tAmount: {
-            $sum: "$total",
-          },
-        },
-      },
+    const [
+      totalDoc,
+      rows,
+      totalAgg,
+      todayOrder,
+      pending,
+      processing,
+      delivered,
+      weeklySaleReport,
+      latest,
+    ] = await Promise.all([
+      orders().count(),
+      orders().findMany({
+        include: { items: true },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+      }),
+      orders().aggregate({ _sum: { total: true }, _count: { _all: true } }),
+      // El panel sólo suma `total` y agrupa por fecha/estado en estas dos
+      // listas, así que van sin el carrito (`cart` sale vacío).
+      orders().findMany({ where: { createdAt: { gte: startOfToday } } }),
+      statusTotals("pedido"),
+      statusTotals("empaquetado"),
+      statusTotals("entregado"),
+      orders().findMany({
+        where: { status: "entregado", createdAt: { gte: week } },
+      }),
+      // El total "de este mes" en Mongo era el del mes más reciente CON pedidos,
+      // no necesariamente el mes en curso; se conserva ese criterio.
+      orders().findFirst({
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
     ]);
 
-    // total order amount
-    const todayOrder = await Order.find({ createdAt: { $gte: start } });
-
-    // this month order amount
-    const totalAmountOfThisMonth = await Order.aggregate([
-      {
-        $group: {
-          _id: {
-            year: {
-              $year: "$createdAt",
-            },
-            month: {
-              $month: "$createdAt",
-            },
-          },
-          total: {
-            $sum: "$total",
-          },
-        },
-      },
-      {
-        $sort: { _id: -1 },
-      },
-      {
-        $limit: 1,
-      },
-    ]);
-
-    // total pedido order count
-    const totalPendingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "pedido",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    // total empaquetado order count
-    const totalProcessingOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "empaquetado",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    // total entregado order count
-    const totalDeliveredOrder = await Order.aggregate([
-      {
-        $match: {
-          status: "entregado",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-          count: {
-            $sum: 1,
-          },
-        },
-      },
-    ]);
-
-    //weekly sale report
-    // filter order data
-    const weeklySaleReport = await Order.find({
-      status: { $regex: `entregado`, $options: "i" },
-      createdAt: {
-        $gte: week,
-      },
-    });
+    let totalAmountOfThisMonth = 0;
+    if (latest) {
+      const from = new Date(latest.createdAt.getFullYear(), latest.createdAt.getMonth(), 1);
+      const to = new Date(latest.createdAt.getFullYear(), latest.createdAt.getMonth() + 1, 1);
+      const monthAgg = await orders().aggregate({
+        where: { createdAt: { gte: from, lt: to } },
+        _sum: { total: true },
+      });
+      totalAmountOfThisMonth = num(monthAgg._sum.total).toFixed(2);
+    }
 
     res.send({
       totalOrder: totalDoc,
       totalAmount:
-        totalAmount.length === 0
-          ? 0
-          : parseFloat(totalAmount[0].tAmount).toFixed(2),
-      todayOrder: todayOrder,
-      totalAmountOfThisMonth:
-        totalAmountOfThisMonth.length === 0
-          ? 0
-          : parseFloat(totalAmountOfThisMonth[0].total).toFixed(2),
-      totalPendingOrder:
-        totalPendingOrder.length === 0 ? 0 : totalPendingOrder[0],
-      totalProcessingOrder:
-        totalProcessingOrder.length === 0 ? 0 : totalProcessingOrder[0].count,
-      totalDeliveredOrder:
-        totalDeliveredOrder.length === 0 ? 0 : totalDeliveredOrder[0].count,
-      orders,
-      weeklySaleReport,
+        totalAgg._count._all === 0 ? 0 : num(totalAgg._sum.total).toFixed(2),
+      todayOrder: todayOrder.map(orderToApi),
+      totalAmountOfThisMonth,
+      totalPendingOrder: pending || 0,
+      totalProcessingOrder: processing?.count || 0,
+      totalDeliveredOrder: delivered?.count || 0,
+      orders: rows.map(orderToApi),
+      weeklySaleReport: weeklySaleReport.map(orderToApi),
     });
   } catch (err) {
-    res.status(500).send({
-      message: err.message,
-    });
+    fail(res, err);
   }
 };
 

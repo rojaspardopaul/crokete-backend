@@ -17,7 +17,7 @@ function fakeCache(): CatalogCachePort {
 const dto = {
   title: { es: "Pienso" },
   slug: "royal-canin",
-  category: "665f1b2c3d4e5f6a7b8c9d0e",
+  category: "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10",
   prices: { originalPrice: 100, price: 90 },
   isCombination: false,
   visualTags: ["new"],

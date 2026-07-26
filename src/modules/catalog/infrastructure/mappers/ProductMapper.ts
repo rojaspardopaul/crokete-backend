@@ -11,8 +11,12 @@ const MODELLED_KEYS = new Set<string>([
 ]);
 
 /**
- * Translates between the Mongoose persistence document and the Product
- * aggregate. The domain stays free of Mongoose; persistence stays free of VOs.
+ * Traduce entre el documento de persistencia y el agregado Product. El dominio
+ * queda libre de la base y la persistencia libre de objetos de valor.
+ *
+ * El "documento" es la forma heredada de la API (`prices` anidado, variantes en
+ * línea, categorías por id): quien la convierte a las columnas normalizadas de
+ * Postgres es lib/prisma/catalog, el mismo módulo que usan los controladores.
  */
 export const ProductMapper = {
   toDomain(doc: Record<string, unknown>): Product {

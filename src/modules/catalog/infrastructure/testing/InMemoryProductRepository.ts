@@ -11,9 +11,11 @@ export class InMemoryProductRepository implements IProductRepository {
   private store = new Map<string, Record<string, unknown>>();
   private counter = 0;
 
+  /** uuid determinista: mismo formato que la clave primaria, sin aleatoriedad. */
   nextIdentity(): string {
     this.counter += 1;
-    return this.counter.toString(16).padStart(24, "0");
+    const hex = this.counter.toString(16).padStart(12, "0");
+    return `00000000-0000-4000-8000-${hex}`;
   }
 
   async findById(id: string): Promise<Product | null> {

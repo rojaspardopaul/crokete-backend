@@ -3,10 +3,8 @@
  * Handles product data generation using AI providers.
  */
 
-const Category = require("../models/Category");
-const Brand = require("../models/Brand");
-const Pet = require("../models/Pet");
-const Attribute = require("../models/Attribute");
+const { getPrisma } = require("../lib/prisma");
+const { isUuid } = require("../lib/prisma/helpers");
 const { generateProductJSON, getAvailableProviders } = require("../lib/ai/providers");
 const { buildProductPrompt } = require("../lib/ai/promptBuilder");
 
@@ -18,8 +16,8 @@ const { buildProductPrompt } = require("../lib/ai/promptBuilder");
  *   productName: string (required),
  *   productType: "food" | "medicine" | "accessory" (required),
  *   provider: "gemini" | "openai" (default: "gemini"),
- *   brandId: string (optional - MongoDB ObjectId),
- *   categoryId: string (optional - MongoDB ObjectId),
+ *   brandId: string (optional - uuid),
+ *   categoryId: string (optional - uuid),
  *   petType: "dog" | "cat" | "both" (optional),
  *   additionalInfo: string (optional - extra context from user)
  * }
@@ -76,32 +74,42 @@ const generateProductData = async (req, res) => {
     let categoryName = "";
 
     // Fetch category info
-    if (categoryId) {
-      const category = await Category.findById(categoryId);
+    if (isUuid(categoryId)) {
+      const category = await getPrisma().category.findUnique({
+        where: { id: categoryId },
+      });
       if (category) {
-        contextData.categoryId = category._id.toString();
-        contextData.categoryIds = [category._id.toString()];
+        contextData.categoryId = category.id;
+        contextData.categoryIds = [category.id];
         categoryName = category.name?.es || category.name?.en || "";
       }
     }
 
     // Fetch brand info
-    if (brandId) {
-      const brand = await Brand.findById(brandId);
+    if (isUuid(brandId)) {
+      const brand = await getPrisma().brand.findUnique({ where: { id: brandId } });
       if (brand) {
-        contextData.brandId = brand._id.toString();
+        contextData.brandId = brand.id;
         brandName = brand.name?.es || brand.name?.en || "";
       }
     }
 
     // Fetch pet info
     if (petType) {
-      const petQuery = petType === "both" 
-        ? {} 
-        : { $or: [{ "name.es": new RegExp(petType === "dog" ? "perro" : "gato", "i") }] };
-      const pet = await Pet.findOne(petQuery);
+      // El nombre es multi-idioma (jsonb): se busca dentro de la clave `es`.
+      const where =
+        petType === "both"
+          ? {}
+          : {
+              name: {
+                path: ["es"],
+                string_contains: petType === "dog" ? "perro" : "gato",
+                mode: "insensitive",
+              },
+            };
+      const pet = await getPrisma().pet.findFirst({ where });
       if (pet) {
-        contextData.petId = pet._id.toString();
+        contextData.petId = pet.id;
       }
     }
 
@@ -194,7 +202,7 @@ function normalizeImages(images) {
 }
 
 /**
- * Post-process AI response to inject real MongoDB IDs
+ * Post-process AI response to inject real database IDs
  * and ensure data shape matches the Product model.
  */
 function postProcessAIResponse(aiData, contextData) {

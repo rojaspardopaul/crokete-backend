@@ -10,7 +10,7 @@ import type { NotificationPort } from "../notifications/application/Notification
 import { onOrderPaidDecrementStock } from "../inventory/application/handlers/onOrderPaidDecrementStock";
 import { onOrderPaidGrantPoints } from "../loyalty/application/handlers/onOrderPaidGrantPoints";
 import { onOrderPaidSendEmail } from "../notifications/application/handlers/onOrderPaidSendEmail";
-import { MongoInventoryAdapter } from "../inventory/infrastructure/MongoInventoryAdapter";
+import { PrismaInventoryAdapter } from "../inventory/infrastructure/PrismaInventoryAdapter";
 import { LoggingLoyaltyAdapter } from "../loyalty/infrastructure/LoggingLoyaltyAdapter";
 import { LoggingNotificationAdapter } from "../notifications/infrastructure/LoggingNotificationAdapter";
 
@@ -37,7 +37,7 @@ export function buildOrdersModule(deps: OrdersModuleDeps): {
 } {
   const events = deps.events ?? defaultEventBus;
   const logger = deps.logger ?? defaultLogger;
-  const inventory = deps.inventory ?? new MongoInventoryAdapter();
+  const inventory = deps.inventory ?? new PrismaInventoryAdapter();
   const loyalty = deps.loyalty ?? new LoggingLoyaltyAdapter(logger);
   const notifications =
     deps.notifications ?? new LoggingNotificationAdapter(logger);

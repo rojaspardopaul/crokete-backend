@@ -8,8 +8,8 @@ import {
   createCustomerRouter,
   type CustomerRouteGuards,
 } from "./presentation/customerRoutes";
-import { CustomerRepositoryMongo } from "./infrastructure/CustomerRepositoryMongo";
-import { CustomerReadAdapter } from "./infrastructure/CustomerReadAdapter";
+import { CustomerRepositoryPrisma } from "./infrastructure/CustomerRepositoryPrisma";
+import { CustomerReadAdapterPrisma } from "./infrastructure/CustomerReadAdapterPrisma";
 
 export interface CustomersModuleDeps {
   /** Token signing (inject legacy config/auth generateAccess/RefreshToken). */
@@ -30,8 +30,8 @@ export function buildCustomersModule(deps: CustomersModuleDeps): {
   router: Router;
   useCases: { updateCustomer: UpdateCustomer; setShippingAddress: SetShippingAddress };
 } {
-  const repo = deps.repo ?? new CustomerRepositoryMongo();
-  const read = deps.read ?? new CustomerReadAdapter();
+  const repo = deps.repo ?? new CustomerRepositoryPrisma();
+  const read = deps.read ?? new CustomerReadAdapterPrisma();
 
   const updateCustomer = new UpdateCustomer(repo, deps.tokens);
   const setShippingAddress = new SetShippingAddress(repo);

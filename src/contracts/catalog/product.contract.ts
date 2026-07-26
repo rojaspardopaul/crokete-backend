@@ -1,5 +1,5 @@
 import { z, registry } from "../openapi";
-import { MultiLangTextSchema, ObjectIdSchema } from "../shared";
+import { MultiLangTextSchema, IdSchema } from "../shared";
 
 /**
  * The legacy admin form sometimes sends array fields as a bare string (or "")
@@ -13,7 +13,7 @@ const toArray = (val: unknown): unknown => {
   return [val];
 };
 const FlexibleStringArray = z.preprocess(toArray, z.array(z.string()));
-const FlexibleObjectIdArray = z.preprocess(toArray, z.array(ObjectIdSchema));
+const FlexibleIdArray = z.preprocess(toArray, z.array(IdSchema));
 const FlexibleVariantArray = z.preprocess(
   (v) => (v === "" || v === null || v === undefined ? [] : v),
   z.array(z.record(z.string(), z.unknown()))
@@ -45,17 +45,17 @@ export const ProductDTOSchema = registry.register(
   "Product",
   z
     .object({
-      _id: ObjectIdSchema,
+      _id: IdSchema,
       productId: z.string().optional(),
       sku: z.string().optional(),
       barcode: z.string().optional(),
       title: MultiLangTextSchema,
       description: MultiLangTextSchema.optional(),
       slug: z.string(),
-      categories: z.array(ObjectIdSchema).optional(),
-      category: ObjectIdSchema.optional(),
-      pet: ObjectIdSchema.nullable().optional(),
-      brand: ObjectIdSchema.nullable().optional(),
+      categories: z.array(IdSchema).optional(),
+      category: IdSchema.optional(),
+      pet: IdSchema.nullable().optional(),
+      brand: IdSchema.nullable().optional(),
       image: z.array(z.string()).optional(),
       stock: z.number().min(0).optional(),
       sales: z.number().optional(),
@@ -87,10 +87,10 @@ export const CreateProductDTOSchema = registry.register(
       title: MultiLangTextSchema,
       description: MultiLangTextSchema.optional(),
       slug: z.string().min(1),
-      categories: FlexibleObjectIdArray.optional(),
-      category: ObjectIdSchema,
-      pet: ObjectIdSchema.nullable().optional(),
-      brand: ObjectIdSchema.nullable().optional(),
+      categories: FlexibleIdArray.optional(),
+      category: IdSchema,
+      pet: IdSchema.nullable().optional(),
+      brand: IdSchema.nullable().optional(),
       image: FlexibleStringArray.optional(),
       stock: z.coerce.number().min(0).optional(),
       tag: FlexibleStringArray.optional(),

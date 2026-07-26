@@ -13,11 +13,19 @@ export const MultiLangTextSchema = registry.register(
 );
 export type MultiLangText = z.infer<typeof MultiLangTextSchema>;
 
-/** Mongo ObjectId rendered as a 24-char hex string over the wire. */
-export const ObjectIdSchema = z
+/**
+ * Identificador de recurso: un uuid v4, que es lo que usan las claves primarias
+ * de Postgres. Antes exigía un ObjectId de Mongo (24 hex), de modo que tras la
+ * migración el contrato rechazaba cualquier id real de la base.
+ */
+export const IdSchema = z
   .string()
-  .regex(/^[a-f\d]{24}$/i, "Invalid ObjectId")
-  .openapi({ example: "665f1b2c3d4e5f6a7b8c9d0e" });
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    "Identificador no válido"
+  )
+  .openapi({ example: "3f1b9f0c-7a1e-4d2b-9f3a-2c8e5d6b7a10" });
+
 
 /** Standard error envelope returned by the API. */
 export const ErrorResponseSchema = registry.register(

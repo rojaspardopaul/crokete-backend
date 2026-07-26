@@ -24,31 +24,12 @@ const CONFIG = {
   },
 
   // ============================================
-  // CLOUDINARY - GESTIÓN DE IMÁGENES
+  // IMÁGENES DE MARCA (Supabase Storage)
   // ============================================
-  CLOUDINARY: {
-    // URL base (sin la imagen)
-    BASE_URL: 'https://res.cloudinary.com/dr397rg7u/image/upload/v1770007311/',
-    
-    // Imágenes centralizadas (solo nombres de archivo)
-    IMAGES: {
-      // Logo principal de la empresa
-      LOGO: 'logo-crokete_omowja.png',
-      
-      // Agregar más imágenes aquí según sea necesario
-      // Ejemplo:
-      // BANNER_HOME: 'banner-home.png',
-      // ICON_CATEGORY: 'icon-category.png',
-    },
-    
-    /**
-     * Método helper para obtener URL completa de una imagen
-     * @param {string} imageName - Nombre del archivo de imagen
-     * @returns {string} URL completa de la imagen
-     */
-    getImageUrl(imageName) {
-      return this.BASE_URL + imageName;
-    },
+  // Assets fijos que usan las plantillas de correo. No son contenido editable
+  // del catálogo: viven en el bucket público y se referencian por URL directa.
+  ASSETS: {
+    LOGO: 'https://mcvufmicaqrhgwdharub.supabase.co/storage/v1/object/public/crokete/marca/1785042671896-w0e0eevg.webp',
   },
 
   // ============================================

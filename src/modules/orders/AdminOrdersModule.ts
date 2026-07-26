@@ -6,8 +6,8 @@ import { UpdateOrderStatus } from "./application/use-cases/UpdateOrderStatus";
 import { DeleteOrder } from "./application/use-cases/DeleteOrder";
 import { AdminOrderController } from "./presentation/AdminOrderController";
 import { createAdminOrderRouter } from "./presentation/adminOrderRoutes";
-import { OrderRepositoryMongo } from "./infrastructure/OrderRepositoryMongo";
-import { OrderReadAdapter } from "./infrastructure/OrderReadAdapter";
+import { OrderRepositoryPrisma } from "./infrastructure/OrderRepositoryPrisma";
+import { OrderReadAdapterPrisma } from "./infrastructure/OrderReadAdapterPrisma";
 
 export interface AdminOrdersModuleDeps {
   /** Status side effects (loyalty + email). Required: pass the legacy adapter. */
@@ -29,8 +29,8 @@ export function buildAdminOrdersModule(deps: AdminOrdersModuleDeps): {
   useCases: { updateOrderStatus: UpdateOrderStatus; deleteOrder: DeleteOrder };
 } {
   const events = deps.events ?? defaultEventBus;
-  const orders = deps.orders ?? new OrderRepositoryMongo();
-  const read = deps.read ?? new OrderReadAdapter();
+  const orders = deps.orders ?? new OrderRepositoryPrisma();
+  const read = deps.read ?? new OrderReadAdapterPrisma();
 
   const updateOrderStatus = new UpdateOrderStatus(orders, deps.effects, events);
   const deleteOrder = new DeleteOrder(orders);

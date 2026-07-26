@@ -2,9 +2,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const mongoSanitize = require("express-mongo-sanitize");
 
-const { connectDB } = require("../config/db");
+const { getPrisma, disconnectPrisma } = require("../lib/prisma");
 const { printConfigDiagnostics, syncEnvToDb } = require("../utils/getConfig");
 const { globalLimiter, searchLimiter, paymentLimiter } = require("../lib/security/apiRateLimiter");
 const { warmCache } = require("../lib/cache/warming");
@@ -34,17 +33,14 @@ const uploadRoutes = require("../routes/uploadRoutes");
 const contactRoutes = require("../routes/contactRoutes");
 const { isAuth, isAdmin } = require("../config/auth");
 
-const mongoose = require("mongoose");
-
 // ─── Catalog module: legacy JS or new TypeScript/DDD (feature-flagged) ───────
 // USE_TS_CATALOG=true serves /v1/products from the compiled TS module
 // (dist/modules/catalog), which has full endpoint parity with the legacy
 // controller. The legacy app cache (utils/cache) is injected so invalidation
 // stays consistent across modules. Roll back instantly by unsetting the flag.
 //
-// Built HERE (after the route requires above) on purpose: those requires have
-// already registered the legacy Mongoose models, so the TS module reuses the
-// full legacy schemas instead of racing to register its own.
+// Ambos caminos ejecutan las mismas consultas (lib/prisma/catalog) y los mismos
+// presentadores, así que la respuesta no depende del flag.
 let productRoutes;
 if (process.env.USE_TS_CATALOG === "true") {
   const sharedCache = require("../utils/cache");
@@ -97,7 +93,6 @@ if (process.env.USE_TS_CUSTOMERS === "true") {
   console.log("🟢 Customers: módulo TypeScript/DDD activo para perfil/direcciones (USE_TS_CUSTOMERS=true)");
 }
 
-connectDB();
 const app = express();
 
 // We are using this for the express-rate-limit middleware
@@ -116,7 +111,9 @@ app.use("/v1/ai", express.json({ limit: "15mb" }));
 app.use("/v1/upload", express.json({ limit: "15mb" }));
 
 app.use(express.json({ limit: "4mb" }));
-app.use(mongoSanitize());
+// express-mongo-sanitize se retiró con la migración: limpiaba operadores `$` y
+// puntos de las claves del body para evitar inyección en consultas de Mongo.
+// Prisma envía parámetros tipados, así que ya no hay nada que sanear ahí.
 app.use(helmet());
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -143,12 +140,15 @@ app.use(cors(corsOptions));
 app.use(globalLimiter);
 
 // Health check — para Cloud Run y load balancers
-app.get("/health", (req, res) => {
-  const dbState = mongoose.connection.readyState;
-  if (dbState !== 1) {
-    return res.status(503).json({ status: "error", db: "disconnected" });
+// Prisma abre la conexión de forma perezosa, así que no hay un "readyState" que
+// consultar: se comprueba con una consulta trivial contra Postgres.
+app.get("/health", async (req, res) => {
+  try {
+    await getPrisma().$queryRaw`SELECT 1`;
+    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: "error", db: "disconnected" });
   }
-  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 app.get("/", (req, res) => {
@@ -237,10 +237,10 @@ const gracefulShutdown = async (signal) => {
   console.log(`\n${signal} recibido. Cerrando servidor...`);
   server.close(async () => {
     try {
-      await mongoose.connection.close();
-      console.log("MongoDB desconectado. Proceso terminado.");
+      await disconnectPrisma();
+      console.log("Postgres desconectado. Proceso terminado.");
     } catch (err) {
-      console.error("Error al cerrar MongoDB:", err.message);
+      console.error("Error al cerrar Postgres:", err.message);
     }
     process.exit(0);
   });

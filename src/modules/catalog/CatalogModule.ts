@@ -12,11 +12,11 @@ import {
 } from "./application/use-cases/BulkProducts";
 import { ProductController } from "./presentation/ProductController";
 import { createProductRouter } from "./presentation/productRoutes";
-import { ProductRepositoryMongo } from "./infrastructure/repositories/ProductRepositoryMongo";
+import { ProductRepositoryPrisma } from "./infrastructure/repositories/ProductRepositoryPrisma";
 import { CacheService } from "./infrastructure/cache/CacheService";
 import type { CachePort } from "./infrastructure/cache/CachePort";
 import { CatalogCacheAdapter } from "./infrastructure/cache/CatalogCacheAdapter";
-import { CatalogReadAdapter } from "./infrastructure/read/CatalogReadAdapter";
+import { CatalogReadAdapterPrisma } from "./infrastructure/read/CatalogReadAdapterPrisma";
 
 export interface CatalogModuleDeps {
   products?: IProductRepository;
@@ -56,12 +56,12 @@ export function buildCatalogModule(deps: CatalogModuleDeps = {}): {
   };
 } {
   const events = deps.events ?? defaultEventBus;
-  const products = deps.products ?? new ProductRepositoryMongo();
+  const products = deps.products ?? new ProductRepositoryPrisma();
 
   // Cache + read share one low-level cache (injected in production).
   const cacheService = deps.cacheService ?? new CacheService();
   const cache = deps.cache ?? new CatalogCacheAdapter(cacheService);
-  const read = deps.read ?? new CatalogReadAdapter(cacheService);
+  const read = deps.read ?? new CatalogReadAdapterPrisma(cacheService);
 
   const createProduct = new CreateProduct(products, cache, events);
   const updateProduct = new UpdateProduct(products, cache);

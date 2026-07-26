@@ -5,8 +5,6 @@ const {
   getOrderById,
   getOrderCustomer,
   createPaymentIntent,
-  addRazorpayOrder,
-  createOrderByRazorPay,
   sendEmailInvoiceToCustomer,
 } = require("../controller/customerOrderController");
 
@@ -17,12 +15,6 @@ router.post("/add", addOrder);
 
 // create stripe payment intent
 router.post("/create-payment-intent", createPaymentIntent);
-
-//add razorpay order
-router.post("/add/razorpay", addRazorpayOrder);
-
-//add a order by razorpay
-router.post("/create/razorpay", createOrderByRazorPay);
 
 //get all order by a user
 router.get("/", getOrderCustomer);

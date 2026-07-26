@@ -1,14 +1,37 @@
 require("dotenv").config();
-const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const Admin = require("../models/Admin");
+const { getPrisma, disconnectPrisma } = require("../lib/prisma");
+
+const ACCESS_LIST = [
+  "dashboard",
+  "products",
+  "categories",
+  "attributes",
+  "coupons",
+  "customers",
+  "orders",
+  "our-staff",
+  "settings",
+  "languages",
+  "currencies",
+  "store",
+  "customization",
+  "store-settings",
+  "product",
+  "order",
+  "edit-profile",
+  "customer-order",
+  "notifications",
+  "coming-soon",
+];
 
 const initSuperAdmin = async () => {
+  const prisma = getPrisma();
+
   try {
-    // Connect to MongoDB
-    console.log("🔌 Connecting to MongoDB...");
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("✅ Connected to MongoDB");
+    console.log("🔌 Conectando a Postgres...");
+    await prisma.$queryRaw`SELECT 1`;
+    console.log("✅ Conectado");
 
     // Check if environment variables are set
     const email = process.env.SUPER_ADMIN_EMAIL;
@@ -16,88 +39,70 @@ const initSuperAdmin = async () => {
     const name = process.env.SUPER_ADMIN_NAME || "Super Admin";
 
     if (!email || !password) {
-      console.error("❌ ERROR: SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be set in .env file");
-      console.log("\nAdd these lines to your .env file:");
-      console.log("SUPER_ADMIN_EMAIL=your_email@crokete.com.mx");
-      console.log("SUPER_ADMIN_PASSWORD=YourSecurePassword123!");
-      console.log("SUPER_ADMIN_NAME=Administrator Name (optional)");
+      console.error("❌ ERROR: SUPER_ADMIN_EMAIL y SUPER_ADMIN_PASSWORD deben estar definidos en .env");
+      console.log("\nAgrega estas líneas a tu archivo .env:");
+      console.log("SUPER_ADMIN_EMAIL=tu_correo@crokete.com.mx");
+      console.log("SUPER_ADMIN_PASSWORD=TuContraseñaSegura123!");
+      console.log("SUPER_ADMIN_NAME=Nombre del administrador (opcional)");
       process.exit(1);
     }
 
-    // Check if a super admin already exists
-    const existingSuperAdmin = await Admin.findOne({ role: "super admin" });
-    
-    if (existingSuperAdmin) {
-      console.log("⚠️  A Super Admin already exists:");
-      console.log(`   Email: ${existingSuperAdmin.email}`);
-      console.log(`   Name: ${existingSuperAdmin.name}`);
-      console.log("\n✅ No action needed. Super Admin already initialized.");
-      process.exit(0);
-    }
+    const normalizedEmail = String(email).toLowerCase();
 
-    // Check if email is already in use
-    const existingAdmin = await Admin.findOne({ email });
-    if (existingAdmin) {
-      console.error(`❌ ERROR: Email ${email} is already in use by another admin`);
-      console.log(`   Existing admin role: ${existingAdmin.role}`);
-      console.log("\nIf you want to promote this admin to super admin, please do it manually in the database.");
-      process.exit(1);
-    }
-
-    // Create the first super admin
-    console.log("\n🔐 Creating Super Admin...");
-    const superAdmin = new Admin({
-      name: { firstName: name, lastName: "" },
-      email,
-      password: bcrypt.hashSync(password, 10),
-      role: "super admin",
-      status: "activo",
-      phone: "",
-      joiningDate: new Date(),
-      image: "",
-      access_list: [
-        'dashboard',
-        'products',
-        'categories',
-        'attributes',
-        'coupons',
-        'customers',
-        'orders',
-        'our-staff',
-        'settings',
-        'languages',
-        'currencies',
-        'store',
-        'customization',
-        'store-settings',
-        'product',
-        'order',
-        'edit-profile',
-        'customer-order',
-        'notifications',
-        'coming-soon',
-      ],
+    // El enum de Postgres no admite espacios: el rol se guarda como super_admin
+    // y los presentadores lo devuelven como "super admin" a la API.
+    const existingSuperAdmin = await prisma.admin.findFirst({
+      where: { role: "super_admin" },
     });
 
-    await superAdmin.save();
+    if (existingSuperAdmin) {
+      console.log("⚠️  Ya existe un Super Admin:");
+      console.log(`   Correo: ${existingSuperAdmin.email}`);
+      console.log(`   Nombre: ${JSON.stringify(existingSuperAdmin.name)}`);
+      console.log("\n✅ No hay nada que hacer.");
+      return;
+    }
 
-    console.log("\n✅ Super Admin created successfully!");
-    console.log("\n📋 Super Admin Details:");
-    console.log(`   Email: ${email}`);
-    console.log(`   Name: ${name}`);
-    console.log(`   Role: super admin`);
-    console.log(`   Status: activo`);
-    console.log("\n🔑 You can now login with these credentials at:");
-    console.log(`   ${process.env.ADMIN_URL || 'http://localhost:4100'}`);
-    console.log("\n⚠️  IMPORTANT: Keep your credentials secure and delete them from .env after first login!");
+    const existingAdmin = await prisma.admin.findUnique({
+      where: { email: normalizedEmail },
+    });
+    if (existingAdmin) {
+      console.error(`❌ ERROR: el correo ${email} ya lo usa otro administrador`);
+      console.log(`   Rol del administrador existente: ${existingAdmin.role}`);
+      console.log("\nSi quieres promoverlo a super admin, hazlo manualmente en la base de datos.");
+      process.exit(1);
+    }
 
+    console.log("\n🔐 Creando Super Admin...");
+    await prisma.admin.create({
+      data: {
+        name: { firstName: name, lastName: "" },
+        email: normalizedEmail,
+        password: bcrypt.hashSync(password, 10),
+        role: "super_admin",
+        status: "activo",
+        phone: "",
+        joiningDate: new Date(),
+        image: "",
+        accessList: ACCESS_LIST,
+      },
+    });
+
+    console.log("\n✅ ¡Super Admin creado!");
+    console.log("\n📋 Datos:");
+    console.log(`   Correo: ${email}`);
+    console.log(`   Nombre: ${name}`);
+    console.log(`   Rol: super admin`);
+    console.log(`   Estado: activo`);
+    console.log("\n🔑 Ya puedes iniciar sesión en:");
+    console.log(`   ${process.env.ADMIN_URL || "http://localhost:4100"}`);
+    console.log("\n⚠️  IMPORTANTE: borra las credenciales del .env tras el primer acceso.");
   } catch (error) {
-    console.error("❌ Error creating Super Admin:", error.message);
+    console.error("❌ Error al crear el Super Admin:", error.message);
     process.exit(1);
   } finally {
-    // Close MongoDB connection
-    await mongoose.connection.close();
-    console.log("\n🔌 MongoDB connection closed");
+    await disconnectPrisma();
+    console.log("\n🔌 Conexión cerrada");
   }
 };
 
