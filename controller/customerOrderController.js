@@ -319,11 +319,39 @@ const createPaymentIntent = async (req, res) => {
     return res.status(500).json({ message: "Monto no válido." });
   }
 
-  const { secretKey } = await getStripeConfig();
+  const stripeConfig = await getStripeConfig();
+  const { secretKey } = stripeConfig;
   if (!secretKey) {
     console.error("❌ Stripe secret key not configured. Set STRIPE_SECRET in .env or stripe_secret in Store Settings");
     return res.status(500).json({ message: "Stripe no está configurado. Contacta al administrador." });
   }
+
+  // El intento de pago se crea aquí con la clave secreta, pero lo confirma el
+  // navegador con la pública de `storeSetting`. Si son de cuentas distintas, el
+  // pago moría a mitad con un `resource_missing` que sólo veía el cliente: el
+  // backend respondía 200 y no quedaba rastro del fallo. Se corta antes.
+  if (!stripeConfig.accountsMatch) {
+    const detalle =
+      `clave secreta de la cuenta ${stripeConfig.secretAccount} (${stripeConfig.secretMode}, origen ${stripeConfig.source}) ` +
+      `pero la tienda cobra con la pública de ${stripeConfig.storeAccount} (${stripeConfig.storeMode})`;
+    console.error(`❌ Stripe: claves de cuentas distintas — ${detalle}`);
+
+    logPaymentEvent({
+      userId: req.user?._id,
+      userEmail: email,
+      event: "PAYMENT_FAILED",
+      amount,
+      status: "error",
+      errorMessage: `Configuración inválida: ${detalle}`,
+      req,
+    });
+
+    return res.status(503).json({
+      message:
+        "El cobro con tarjeta no está disponible en este momento. Por favor, elige pago contra entrega o inténtalo más tarde.",
+    });
+  }
+
   const stripeInstance = stripe(secretKey);
   if (payment_intent?.id) {
     try {

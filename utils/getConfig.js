@@ -29,11 +29,37 @@ const invalidateConfigCache = () => {
 
 const getStripeConfig = async () => {
   const db = await getStoreSetting();
+
+  const secretKey = process.env.STRIPE_SECRET || db.stripe_secret || null;
+  const publicKey = process.env.STRIPE_KEY || db.stripe_key || null;
+
+  // La tienda carga Stripe.js SIEMPRE con `storeSetting.stripe_key`, sin mirar
+  // el entorno, así que ésta es la clave con la que el navegador confirmará el
+  // pago. Es contra ella —no contra `publicKey`— que hay que comparar la
+  // secreta: si el entorno trae un par coherente pero la base tiene otro, el
+  // navegador seguiría usando el de la base y la comparación daría un falso OK.
+  const storePublicKey = db.stripe_key || publicKey || null;
+
+  const secretAccount = extractAccountPrefix(secretKey);
+  const storeAccount = extractAccountPrefix(storePublicKey);
+
   return {
-    secretKey: process.env.STRIPE_SECRET || db.stripe_secret || null,
-    publicKey: process.env.STRIPE_KEY || db.stripe_key || null,
+    secretKey,
+    publicKey,
+    storePublicKey,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || null,
     source: process.env.STRIPE_SECRET ? ".env" : db.stripe_secret ? "database" : "none",
+    secretAccount,
+    storeAccount,
+    secretMode: getStripeMode(secretKey),
+    storeMode: getStripeMode(storePublicKey),
+    /**
+     * El backend crea el PaymentIntent con la clave secreta y el navegador lo
+     * confirma con la pública. Si son de cuentas distintas, el intento no existe
+     * para el navegador y Stripe responde `resource_missing` en mitad del pago.
+     * Sólo se marca como desajuste cuando ambos prefijos se pudieron leer.
+     */
+    accountsMatch: !secretAccount || !storeAccount || secretAccount === storeAccount,
   };
 };
 
@@ -105,28 +131,35 @@ const printConfigDiagnostics = async () => {
   const dbPK = db.stripe_key;
 
   const activeSK = envSK || dbSK;
-  const activePK = envPK || dbPK;
   const stripeSource = envSK ? ".env" : dbSK ? "database" : "none";
 
-  if (!activeSK || !activePK) {
+  // La comparación se hace contra `stripe_key` de la base porque es la clave
+  // con la que la tienda carga Stripe.js, pase lo que pase en el entorno.
+  const stripePK = dbPK || envPK;
+
+  if (!activeSK || !stripePK) {
     console.log("  ❌ Stripe: NOT CONFIGURED");
     warnings.push("Stripe secret/public key not configured");
   } else {
     const mode = getStripeMode(activeSK);
-    const pkPrefix = extractAccountPrefix(activePK);
+    const pkPrefix = extractAccountPrefix(stripePK);
     const skPrefix = extractAccountPrefix(activeSK);
 
     if (pkPrefix && skPrefix && pkPrefix !== skPrefix) {
-      console.log(`  ⚠️  Stripe: ACCOUNT MISMATCH — pk(${pkPrefix}) ≠ sk(${skPrefix})`);
-      warnings.push(`Stripe public key account (${pkPrefix}) differs from secret key account (${skPrefix})`);
+      console.log(
+        `  ❌ Stripe: CUENTAS DISTINTAS — el backend cobra con sk(${skPrefix}) pero la tienda usa pk(${pkPrefix}).`
+      );
+      console.log("      El pago con tarjeta está DESACTIVADO hasta que coincidan.");
+      warnings.push(
+        `Stripe: la clave secreta es de la cuenta ${skPrefix} y la pública que usa la tienda de ${pkPrefix}`
+      );
+    } else if (getStripeMode(stripePK) !== mode) {
+      console.log(
+        `  ⚠️  Stripe: la clave secreta es ${mode} y la pública de la tienda ${getStripeMode(stripePK)}`
+      );
+      warnings.push("Stripe: modo (test/live) distinto entre la clave secreta y la pública");
     } else {
       console.log(`  ✅ Stripe: ${mode} mode (${skPrefix || "?"}) — source: ${stripeSource}`);
-    }
-
-    // Check DB vs ENV mismatch
-    if (envSK && dbSK && extractAccountPrefix(envSK) !== extractAccountPrefix(dbSK)) {
-      console.log(`  ⚠️  Stripe: DB has different account than .env (DB: ${extractAccountPrefix(dbSK)}, ENV: ${extractAccountPrefix(envSK)})`);
-      warnings.push("DB stripe_secret belongs to a different Stripe account than .env STRIPE_SECRET");
     }
   }
 
