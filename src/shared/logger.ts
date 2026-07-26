@@ -1,9 +1,9 @@
 import pino from "pino";
 
 /**
- * Structured JSON logger (Pino). In the SaaS this is the single logging
- * primitive; Cloud Run ingests the JSON lines directly. In development it
- * pretty-prints. Replaces ad-hoc console.log scattered across the legacy code.
+ * Structured JSON logger (Pino). Es la única primitiva de log de los módulos
+ * nuevos: Railway ingiere las líneas JSON directamente. En desarrollo las
+ * imprime legibles (vía pino-pretty, que por eso es sólo devDependency).
  */
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",
