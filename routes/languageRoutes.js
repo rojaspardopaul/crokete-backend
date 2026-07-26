@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { adminOnlyMutations } = require('../config/routeGuards');
 
 const {
   addLanguage,
@@ -13,6 +14,11 @@ const {
   updateManyLanguage,
   deleteManyLanguage,
 } = require('../controller/languageController');
+
+// Las lecturas son públicas (la tienda necesita la lista de idiomas); crear,
+// editar y borrar exige administrador. Antes este router no tenía ninguna
+// guarda: se podía escribir sin autenticarse.
+router.use(adminOnlyMutations());
 
 // add a language
 router.post('/add', addLanguage);

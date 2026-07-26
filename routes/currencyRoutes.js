@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { adminOnlyMutations } = require('../config/routeGuards');
 
 const {
   addCurrency,
@@ -16,6 +17,11 @@ const {
 } = require('../controller/currencyController');
 
 //add a addCurrency
+// El montaje sólo exige isAuth, de modo que cualquier cliente autenticado podía
+// alterar monedas y tipos de cambio (y con ellos los precios mostrados). Las
+// mutaciones pasan a requerir administrador.
+router.use(adminOnlyMutations());
+
 router.post('/add', addCurrency);
 
 //add all Currency
